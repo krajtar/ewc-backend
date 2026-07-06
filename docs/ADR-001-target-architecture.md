@@ -2,10 +2,12 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Proposed |
+| **Status** | Implemented |
 | **Date** | 2026-07-03 |
 | **Decision Owner** | EWC Platform Team |
 | **Related Issue** | KAM-6 |
+| **Implementation Issue** | KAM-9 |
+| **Implementation Date** | 2026-07-06 |
 | **Supersedes** | — |
 
 ---
@@ -540,3 +542,67 @@ spec doubles as the agent tool definition.
 - OpenAPI spec: [`openapi.yaml`](./openapi.yaml)
 - Auth model: [`auth-authorization-model.md`](./auth-authorization-model.md)
 - Job model: [`job-execution-model.md`](./job-execution-model.md)
+---
+
+## 7. Implementation (KAM-9)
+
+The architecture described in this ADR has been implemented as a
+standalone FastAPI service in the `ewc-backend` repository (Linear issue
+KAM-9, 2026-07-06).
+
+### 7.1 What was built
+
+| Layer | Location | Status |
+|---|---|---|
+| **API Layer** | `app/api/v1/` — 9 routers (auth, profiles, servers, hub, keypairs, dns, s3, jobs, capabilities) | Implemented |
+| **Service Layer** | `app/services/` — 7 services (auth, server, hub, keypair, dns, s3 + shared exceptions) | Implemented |
+| **Backend Clients** | `app/clients/` — Protocol interfaces (`interfaces.py`) + in-memory stubs (`stubs.py`) for OpenStack, Kubernetes, Ansible | Interfaces + stubs (real SDK clients deferred to Phase 5+) |
+| **Domain Models** | `app/models/` — 9 Pydantic model modules (auth, server, hub, keypair, dns, s3, job, profile, common) | Implemented |
+| **Job Engine** | `app/jobs/engine.py` — in-memory async job lifecycle (pending → running → completed/failed/cancelled) with idempotency, dry-run, logs, outputs | In-memory (Redis-backed persistence deferred to KAM-10/Phase 5) |
+| **Configuration** | `app/config.py` — pydantic-settings with `EWC_BACKEND_` env prefix | Implemented |
+| **Logging** | `app/logging.py` — structlog structured logging + request-ID middleware | Implemented |
+| **Health/Readiness** | `/healthz`, `/readyz` | Implemented |
+| **Auto-docs** | `/docs` (Swagger UI), `/redoc`, `/openapi.json` | Implemented (26 paths auto-generated) |
+| **Container** | `Containerfile` — multi-stage build (python:3.12-slim + uv), HEALTHCHECK, uvicorn CMD | Implemented |
+| **Tests** | `tests/` — 77 tests (API integration, health, no-click guard) | Implemented (all passing) |
+
+### 7.2 API surface
+
+The FastAPI auto-generated OpenAPI spec exposes 26 paths across all CLI
+capability domains: auth (login, callback, token, logout), profiles,
+servers (create, list, show, delete, reconfigure), hub (list, show,
+deploy), keypairs, dns records, s3 buckets, and jobs (list, get, cancel,
+logs, outputs). The capabilities endpoint (`GET /v1/capabilities`)
+provides machine-readable operation metadata for AI agent discovery.
+
+### 7.3 What is stubbed
+
+Backend clients use **in-memory stubs** that return deterministic
+responses — no real OpenStack/Kubernetes/Ansible SDK calls are made.
+This allows the API contract, routing, service layer, and job engine to
+be developed and tested independently of cloud infrastructure. Real SDK
+client implementations are deferred to Phase 5+ (KAM-10, KAM-11, KAM-12).
+
+### 7.4 Deviations from the original decision
+
+- **Keycloak/OpenBao auth**: Not yet wired — the auth router exists but
+  uses stub flows. Keycloak OIDC and OpenBao secret store integration
+  are deferred to future phases (see [`auth-authorization-model.md`](./auth-authorization-model.md)).
+- **Job persistence**: In-memory only; job state is lost on restart.
+  Redis-backed persistence is planned for KAM-10.
+- **SSE log streaming**: Jobs endpoint supports log retrieval via polling
+  (`GET /v1/jobs/{jobId}/logs`); SSE streaming is not yet implemented.
+
+### 7.5 How to run
+
+See the root [`README.md`](../README.md) for setup, run, test, and
+container build instructions. Quick start:
+
+```bash
+uv sync
+uv run uvicorn app.main:app --reload   # API at http://localhost:8000
+uv run pytest                          # 77 tests
+```
+
+Interactive API docs are available at `/docs` (Swagger UI) and `/redoc`
+when the server is running.
