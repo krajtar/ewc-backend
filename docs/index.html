@@ -1,0 +1,1374 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ewc-backend — Architecture &amp; API Contract</title>
+<meta name="description" content="Interactive architecture design and OpenAPI contract for extracting ewccli business logic into a standalone backend service.">
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<style>
+:root{
+  --bg:#f7f8fb; --surface:#ffffff; --surface-2:#f1f3f9; --border:#e3e6ee;
+  --text:#1a1f2e; --text-2:#5a6378; --text-3:#8a93a6;
+  --primary:#4f46e5; --primary-d:#4338ca; --primary-l:#eef2ff;
+  --accent:#0d9488; --accent-l:#ccfbf1;
+  --green:#16a34a; --green-l:#dcfce7; --amber:#d97706; --amber-l:#fef3c7;
+  --red:#dc2626; --red-l:#fee2e2; --blue:#2563eb; --blue-l:#dbeafe;
+  --purple:#7c3aed; --purple-l:#ede9fe;
+  --code-bg:#0f172a; --code-text:#e2e8f0;
+  --shadow:0 1px 3px rgba(15,23,42,.06),0 1px 2px rgba(15,23,42,.04);
+  --shadow-lg:0 10px 30px rgba(15,23,42,.08);
+  --radius:12px; --radius-sm:8px;
+  --sidebar-w:286px;
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --mono:"SFMono-Regular",ui-monospace,"Cascadia Code","Fira Code",Menlo,Consolas,monospace;
+}
+[data-theme="dark"]{
+  --bg:#0b0f1a; --surface:#131a2a; --surface-2:#1a2236; --border:#26304a;
+  --text:#e6e9f2; --text-2:#9ba3b8; --text-3:#6b748a;
+  --primary:#818cf8; --primary-d:#6366f1; --primary-l:#1e2438;
+  --accent:#2dd4bf; --accent-l:#0c2e2a;
+  --green-l:#0c2818; --amber-l:#2a1e08; --red-l:#2a1010; --blue-l:#0c1c30; --purple-l:#1c1530;
+  --code-bg:#070b14; --code-text:#cdd6e6;
+  --shadow:0 1px 3px rgba(0,0,0,.3); --shadow-lg:0 10px 30px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;scroll-padding-top:80px}
+body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.65;font-size:15px;-webkit-font-smoothing:antialiased}
+a{color:var(--primary);text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* Sidebar */
+.sidebar{position:fixed;top:0;left:0;width:var(--sidebar-w);height:100vh;background:var(--surface);border-right:1px solid var(--border);overflow-y:auto;z-index:100;transition:transform .25s}
+.sidebar-head{padding:22px 20px 16px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--surface);z-index:2}
+.brand{display:flex;align-items:center;gap:10px}
+.brand-logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,var(--primary),var(--accent));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:15px;flex-shrink:0}
+.brand-title{font-size:14px;font-weight:700;color:var(--text);line-height:1.2}
+.brand-sub{font-size:11px;color:var(--text-3);font-weight:500}
+.nav{padding:12px 10px}
+.nav-section{margin-bottom:6px}
+.nav-label{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);padding:10px 12px 4px}
+.nav-item{display:flex;align-items:center;gap:9px;padding:7px 12px;border-radius:var(--radius-sm);color:var(--text-2);font-size:13.5px;font-weight:500;cursor:pointer;transition:all .12s;text-decoration:none}
+.nav-item:hover{background:var(--surface-2);color:var(--text);text-decoration:none}
+.nav-item.active{background:var(--primary-l);color:var(--primary);font-weight:600}
+.nav-item .ico{width:16px;text-align:center;opacity:.7;font-size:14px}
+.nav-item.active .ico{opacity:1}
+
+/* Main */
+.main{margin-left:var(--sidebar-w);min-height:100vh}
+.topbar{position:sticky;top:0;background:color-mix(in srgb,var(--surface) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);padding:12px 32px;display:flex;align-items:center;justify-content:space-between;z-index:50}
+.topbar-title{font-size:13px;color:var(--text-2);font-weight:600}
+.topbar-actions{display:flex;align-items:center;gap:10px}
+.theme-toggle{background:var(--surface-2);border:1px solid var(--border);border-radius:8px;width:34px;height:34px;cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;color:var(--text-2);transition:all .15s}
+.theme-toggle:hover{border-color:var(--primary);color:var(--primary)}
+.content{max-width:920px;margin:0 auto;padding:36px 32px 80px}
+
+/* Buttons / badges */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:var(--radius-sm);font-size:13px;font-weight:600;cursor:pointer;border:1px solid transparent;transition:all .15s}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-primary:hover{background:var(--primary-d);text-decoration:none}
+.btn-ghost{background:var(--surface-2);border-color:var(--border);color:var(--text-2)}
+.btn-ghost:hover{border-color:var(--primary);color:var(--primary);text-decoration:none}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.02em}
+.badge-green{background:var(--green-l);color:var(--green)} .badge-amber{background:var(--amber-l);color:var(--amber)}
+.badge-blue{background:var(--blue-l);color:var(--blue)} .badge-purple{background:var(--purple-l);color:var(--purple)}
+.badge-red{background:var(--red-l);color:var(--red)} .badge-accent{background:var(--accent-l);color:var(--accent)}
+.badge-gray{background:var(--surface-2);color:var(--text-2)}
+
+/* Hero */
+.hero{background:linear-gradient(135deg,var(--primary),#6366f1 60%,var(--accent));border-radius:18px;padding:40px 38px;color:#fff;margin-bottom:34px;position:relative;overflow:hidden;box-shadow:var(--shadow-lg)}
+.hero:after{content:"";position:absolute;right:-60px;top:-60px;width:260px;height:260px;border-radius:50%;background:rgba(255,255,255,.08)}
+.hero:before{content:"";position:absolute;right:40px;bottom:-80px;width:180px;height:180px;border-radius:50%;background:rgba(255,255,255,.06)}
+.hero h1{font-size:30px;font-weight:800;margin-bottom:8px;position:relative}
+.hero p{font-size:16px;opacity:.92;max-width:620px;position:relative}
+.hero-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px;position:relative}
+.hero-meta .hm{background:rgba(255,255,255,.16);padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600}
+
+/* Sections */
+.section{margin-bottom:48px;scroll-margin-top:80px}
+.section-title{font-size:23px;font-weight:800;margin-bottom:6px;display:flex;align-items:center;gap:10px}
+.section-title .num{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;background:var(--primary-l);color:var(--primary);font-size:14px;font-weight:800;flex-shrink:0}
+.section-desc{color:var(--text-2);font-size:14px;margin-bottom:20px}
+h3{font-size:17px;font-weight:700;margin:26px 0 10px;color:var(--text)}
+h4{font-size:14.5px;font-weight:700;margin:18px 0 8px;color:var(--text-2)}
+p{margin-bottom:12px;color:var(--text)}
+ul,ol{margin:0 0 14px 4px;padding-left:22px}
+li{margin-bottom:5px}
+strong{color:var(--text);font-weight:700}
+hr{border:none;border-top:1px solid var(--border);margin:28px 0}
+
+/* Cards */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px 22px;box-shadow:var(--shadow);margin-bottom:16px}
+.card-accent{border-left:4px solid var(--primary)}
+.grid{display:grid;gap:14px}
+.grid-2{grid-template-columns:repeat(2,1fr)}
+.grid-3{grid-template-columns:repeat(3,1fr)}
+@media(max-width:760px){.grid-2,.grid-3{grid-template-columns:1fr}}
+
+/* Decision card */
+.decision{display:flex;gap:14px;align-items:flex-start}
+.decision-icon{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.decision h4{margin:0 0 3px;font-size:15px}
+.decision p{margin:0;font-size:13px;color:var(--text-2)}
+
+/* Tables */
+.table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);margin-bottom:16px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:var(--surface-2);text-align:left;padding:10px 14px;font-weight:700;color:var(--text-2);white-space:nowrap;border-bottom:1px solid var(--border)}
+td{padding:9px 14px;border-bottom:1px solid var(--border);color:var(--text);vertical-align:top}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--surface-2)}
+code{font-family:var(--mono);font-size:12.5px;background:var(--surface-2);padding:1.5px 5px;border-radius:4px;color:var(--primary)}
+td code{font-size:12px}
+
+/* Code blocks */
+pre{background:var(--code-bg);color:var(--code-text);border-radius:var(--radius);padding:16px 18px;overflow-x:auto;margin-bottom:16px;font-family:var(--mono);font-size:12.5px;line-height:1.6;position:relative}
+pre code{background:none;padding:0;color:inherit;font-size:inherit}
+.copy-btn{position:absolute;top:8px;right:8px;background:rgba(255,255,255,.1);border:none;color:#fff;border-radius:6px;padding:4px 9px;font-size:11px;cursor:pointer;opacity:0;transition:opacity .15s}
+pre:hover .copy-btn{opacity:1}
+.copy-btn:hover{background:rgba(255,255,255,.2)}
+
+/* Mermaid */
+.mermaid-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:18px;overflow-x:auto;text-align:center;box-shadow:var(--shadow)}
+.mermaid{display:inline-block}
+/* Diagram click-to-enlarge */
+.mermaid-wrap{cursor:zoom-in;position:relative;transition:border-color .15s,box-shadow .15s}
+.mermaid-wrap:hover{border-color:var(--primary);box-shadow:0 4px 16px rgba(79,70,229,.13)}
+.mermaid-wrap::after{content:"Click to enlarge";position:absolute;top:8px;right:10px;font-size:11px;font-weight:600;color:var(--text-3);background:var(--surface-2);padding:3px 9px;border-radius:6px;opacity:0;transition:opacity .15s;pointer-events:none;white-space:nowrap;z-index:5}
+.mermaid-wrap:hover::after{opacity:1}
+/* Lightbox overlay */
+.lightbox-overlay{display:none;position:fixed;inset:0;z-index:9999;background:rgba(8,12,24,.95);backdrop-filter:blur(6px)}
+.lightbox-overlay.open{display:block}
+.lightbox-stage{position:absolute;top:54px;bottom:38px;left:14px;right:14px;overflow:hidden;cursor:grab;user-select:none;-webkit-user-select:none;border-radius:12px}
+.lightbox-stage.dragging{cursor:grabbing}
+.lightbox-stage svg{max-width:none!important;max-height:none!important;transform-origin:center center;display:block;position:absolute;top:0;left:0}
+.lightbox-toolbar{position:fixed;top:12px;right:16px;display:flex;gap:7px;z-index:10001}
+.lightbox-btn{width:38px;height:38px;border-radius:10px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.1);color:#fff;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s;line-height:1;padding:0}
+.lightbox-btn:hover{background:rgba(255,255,255,.24)}
+.lightbox-btn.wide{width:auto;padding:0 14px;font-size:13px}
+.lightbox-info{position:fixed;top:18px;left:20px;color:rgba(255,255,255,.72);font-size:14px;font-weight:600;z-index:10001;max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lightbox-hint{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);color:rgba(255,255,255,.42);font-size:12px;z-index:10001;white-space:nowrap}
+
+/* Callouts */
+.callout{border-radius:var(--radius);padding:14px 18px;margin-bottom:14px;border-left:4px solid;font-size:13.5px}
+.callout-title{font-weight:700;margin-bottom:3px;display:flex;align-items:center;gap:7px}
+.callout-info{background:var(--blue-l);border-color:var(--blue);color:var(--text)}
+.callout-warn{background:var(--amber-l);border-color:var(--amber);color:var(--text)}
+.callout-ok{background:var(--green-l);border-color:var(--green);color:var(--text)}
+.callout-danger{background:var(--red-l);border-color:var(--red);color:var(--text)}
+
+/* Pros/Cons */
+.pc-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
+@media(max-width:760px){.pc-grid{grid-template-columns:1fr}}
+.pc{border-radius:var(--radius);padding:16px 18px;border:1px solid var(--border)}
+.pc h4{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.04em}
+.pc ul{margin:0;padding-left:18px;font-size:13px}
+.pc li{margin-bottom:6px;color:var(--text-2)}
+.pc.pos{background:var(--green-l)} .pc.pos h4{color:var(--green)}
+.pc.neg{background:var(--red-l)} .pc.neg h4{color:var(--red)}
+
+/* Stat tiles */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+@media(max-width:680px){.stats{grid-template-columns:repeat(2,1fr)}}
+.stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;text-align:center;box-shadow:var(--shadow)}
+.stat-num{font-size:26px;font-weight:800;color:var(--primary);line-height:1}
+.stat-label{font-size:11px;color:var(--text-3);font-weight:600;margin-top:5px;text-transform:uppercase;letter-spacing:.04em}
+
+/* Swagger */
+#swagger-ui{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-top:8px}
+.swagger-placeholder{padding:50px;text-align:center;color:var(--text-3)}
+.swagger-placeholder .spin{width:34px;height:34px;border:3px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 12px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Footer */
+.footer{border-top:1px solid var(--border);padding:24px 32px;text-align:center;color:var(--text-3);font-size:12px}
+
+/* Mobile */
+.mobile-toggle{display:none;position:fixed;bottom:20px;right:20px;width:48px;height:48px;border-radius:50%;background:var(--primary);color:#fff;border:none;font-size:22px;cursor:pointer;z-index:101;box-shadow:var(--shadow-lg)}
+@media(max-width:900px){
+  .sidebar{transform:translateX(-100%)}
+  .sidebar.open{transform:translateX(0)}
+  .main{margin-left:0}
+  .content{padding:24px 18px 60px}
+  .topbar{padding:10px 18px}
+  .mobile-toggle{display:flex;align-items:center;justify-content:center}
+}
+</style>
+</head>
+<body>
+<!-- Sidebar -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-head">
+    <div class="brand">
+      <div class="brand-logo">EWC</div>
+      <div>
+        <div class="brand-title">ewc-backend</div>
+        <div class="brand-sub">Architecture &amp; API Contract</div>
+      </div>
+    </div>
+  </div>
+  <nav class="nav" id="nav">
+    <div class="nav-section">
+      <div class="nav-label">Overview</div>
+      <a class="nav-item" href="#overview"><span class="ico">📋</span>Context &amp; Goals</a>
+      <a class="nav-item" href="#stats"><span class="ico">📊</span>At a Glance</a>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Architecture</div>
+      <a class="nav-item" href="#architecture"><span class="ico">🏗️</span>System Design</a>
+      <a class="nav-item" href="#layering"><span class="ico">🧅</span>Service Layering</a>
+      <a class="nav-item" href="#framework"><span class="ico">⚡</span>Framework &amp; Tech</a>
+      <a class="nav-item" href="#repo"><span class="ico">📦</span>Repository Layout</a>
+      <a class="nav-item" href="#deployment"><span class="ico">🚀</span>Deployment Topology</a>
+      <a class="nav-item" href="#communication"><span class="ico">📡</span>CLI↔Backend Comms</a>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Security</div>
+      <a class="nav-item" href="#auth"><span class="ico">🔐</span>Auth &amp; Authorization</a>
+      <a class="nav-item" href="#agent-auth"><span class="ico">🤖</span>Agent Authorization</a>
+      <a class="nav-item" href="#credentials"><span class="ico">🔑</span>Credential Rotation</a>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Execution</div>
+      <a class="nav-item" href="#jobs"><span class="ico">⚙️</span>Job Execution Model</a>
+      <a class="nav-item" href="#job-lifecycle"><span class="ico">🔄</span>Job Lifecycle</a>
+      <a class="nav-item" href="#job-streaming"><span class="ico">📺</span>Logs &amp; Streaming</a>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Reference</div>
+      <a class="nav-item" href="#api"><span class="ico">🌐</span>API Explorer</a>
+      <a class="nav-item" href="#capabilities"><span class="ico">🧩</span>CLI Capability Map</a>
+      <a class="nav-item" href="#consequences"><span class="ico">⚖️</span>Consequences</a>
+      <a class="nav-item" href="#alternatives"><span class="ico">🔀</span>Alternatives</a>
+    </div>
+  </nav>
+</aside>
+
+<!-- Main -->
+<div class="main">
+<header class="topbar">
+  <span class="topbar-title">KAM-6 · Phase 1 — Architecture Design &amp; API Contract</span>
+  <div class="topbar-actions">
+    <a class="btn btn-ghost" href="openapi.yaml" target="_blank">Raw OpenAPI</a>
+    <button class="theme-toggle" id="themeToggle" title="Toggle theme">🌙</button>
+  </div>
+</header>
+
+<div class="content">
+
+<!-- Hero -->
+<div class="hero">
+  <h1>ewc-backend Architecture</h1>
+  <p>Extracting all business logic from <strong>ewccli</strong> into a standalone, containerized backend service — with the CLI becoming a thin HTTP client and a first-class API for AI agents.</p>
+  <div class="hero-meta">
+    <span class="hm">📐 ADR-001 · Proposed</span>
+    <span class="hm">📅 2026-07-03</span>
+    <span class="hm">🏷️ Issue KAM-6</span>
+    <span class="hm">⏱️ Effort: S (~1 person-week)</span>
+  </div>
+</div>
+
+<!-- Overview -->
+<section class="section" id="overview">
+  <div class="section-title"><span class="num">1</span> Context &amp; Goals</div>
+  <p class="section-desc">Why we are extracting business logic out of the CLI into a standalone backend.</p>
+
+  <div class="card card-accent">
+    <p><strong>ewccli</strong> is a Python CLI that manages European Weather Cloud (EWC) infrastructure: OpenStack VMs, Kubernetes CRDs (DNS records, S3 buckets), hub-item deployments (Ansible playbooks), and authentication. Today the CLI stores long-term OpenStack credentials in local files and calls the cloud directly; there is no identity provider, no OIDC, and no backend.</p>
+    <p>Today <em>all</em> business logic — OpenStack SDK calls, Ansible execution, Kubernetes CRD management, credential handling — lives inside the CLI process. This creates four core problems:</p>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="card">
+      <div class="decision">
+        <div class="decision-icon" style="background:var(--red-l);color:var(--red)">🔓</div>
+        <div><h4>Credential exposure</h4><p>OpenStack application credentials are stored on the user's local disk (<code>~/.ewccli/profiles</code>) in plaintext. Rotation forces every user to re-run <code>ewc login</code>.</p></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="decision">
+        <div class="decision-icon" style="background:var(--amber-l);color:var(--amber)">⏳</div>
+        <div><h4>No shared state</h4><p>Long-running deployments (VM creation + Ansible, DNS waits up to 20 min) block the terminal. If the CLI is interrupted, the operation is lost with no recovery path.</p></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="decision">
+        <div class="decision-icon" style="background:var(--blue-l);color:var(--blue)">🔁</div>
+        <div><h4>Duplicated logic</h4><p>Any automation, CI pipeline, or future web UI must reimplement the same orchestration logic — or shell out to the CLI.</p></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="decision">
+        <div class="decision-icon" style="background:var(--purple-l);color:var(--purple)">🤖</div>
+        <div><h4>Not agent-friendly</h4><p>AI agents cannot reliably drive a Rich/Click terminal UI; they need structured, predictable HTTP endpoints with machine-readable schemas and error codes.</p></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout callout-info">
+    <div class="callout-title">🎯 Target</div>
+    A standalone <strong>ewc-backend</strong> service holds all business logic. <strong>ewccli</strong> becomes a thin client calling the backend API. AI agents, CI pipelines, and future UIs all consume the same versioned OpenAPI contract.
+  </div>
+</section>
+
+<!-- Stats -->
+<section class="section" id="stats">
+  <div class="section-title"><span class="num">2</span> At a Glance</div>
+  <p class="section-desc">Key numbers from the architecture and API contract.</p>
+  <div class="stats">
+    <div class="stat"><div class="stat-num">24</div><div class="stat-label">API Endpoints</div></div>
+    <div class="stat"><div class="stat-num">9</div><div class="stat-label">Resource Tags</div></div>
+    <div class="stat"><div class="stat-num">29</div><div class="stat-label">Schemas</div></div>
+    <div class="stat"><div class="stat-num">3</div><div class="stat-label">Service Layers</div></div>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="stat-num">6</div><div class="stat-label">Job States</div></div>
+    <div class="stat"><div class="stat-num">15</div><div class="stat-label">OAuth Scopes</div></div>
+    <div class="stat"><div class="stat-num">20m</div><div class="stat-label">Max Job Timeout</div></div>
+    <div class="stat"><div class="stat-num">9</div><div class="stat-label">Diagrams</div></div>
+  </div>
+</section>
+<!-- Architecture -->
+<section class="section" id="architecture">
+  <div class="section-title"><span class="num">3</span> System Architecture</div>
+  <p class="section-desc">The end-to-end topology: clients, the backend service, backend clients, and infrastructure.</p>
+
+  <div class="mermaid-wrap">
+<pre class="mermaid">
+flowchart TD
+  CLI["🖥️ ewccli<br/>Thin Client"]
+  AGENT["🤖 AI Agent"]
+  KC["🗝️ Keycloak<br/>OIDC / OAuth2"]
+
+  subgraph BE["ewc-backend (containerized service)"]
+    direction TB
+    API["API Layer<br/>FastAPI Routers<br/>Auth + Scope Enforcement"]
+    SVC["Service Layer<br/>Business Logic + Orchestration"]
+    BC["Backend Clients<br/>OpenStack · K8s · Ansible"]
+    JE["Job Engine<br/>Async Workers"]
+    DB[("PostgreSQL<br/>Job State + Outputs")]
+    RQ[("Redis<br/>Queue + PubSub")]
+    SM["🔓 Secret Manager (proposed)<br/>OpenBao / Vault"]
+  end
+
+  OS["☁️ OpenStack Cloud<br/>VMs · Keypairs"]
+  K8S["☸️ Kubernetes<br/>DNS CRDs · S3 Buckets"]
+  ANS["📜 Ansible<br/>Hub Deployments"]
+
+  CLI -->|"REST + Bearer token"| API
+  AGENT -->|"REST + Scoped token"| API
+  CLI -.->|"OIDC auth code + PKCE"| KC
+  AGENT -.->|"client_credentials"| KC
+  KC -.->|"JWKS validate"| API
+  API --> SVC
+  SVC --> BC
+  BC --> OS
+  BC --> K8S
+  BC --> ANS
+  SVC -->|"enqueue"| JE
+  JE --> RQ
+  JE --> DB
+  SVC --> SM
+  SM -.->|"read credentials"| OS
+</pre>
+  </div>
+
+  <div class="grid grid-3">
+    <div class="card"><div class="decision"><div class="decision-icon" style="background:var(--primary-l);color:var(--primary)">🌐</div><div><h4>API Layer</h4><p>FastAPI routers, request validation, JWT auth, scope enforcement. Stateless — horizontally scalable.</p></div></div></div>
+    <div class="card"><div class="decision"><div class="decision-icon" style="background:var(--accent-l);color:var(--accent)">⚙️</div><div><h4>Service Layer</h4><p>Business logic &amp; orchestration. Maps API operations to backend client calls and job submissions.</p></div></div></div>
+    <div class="card"><div class="decision"><div class="decision-icon" style="background:var(--blue-l);color:var(--blue)">🔌</div><div><h4>Backend Clients</h4><p>OpenStack SDK, Kubernetes client, Ansible runner. Translates service calls into cloud operations.</p></div></div></div>
+  </div>
+</section>
+
+<!-- Layering -->
+<section class="section" id="layering">
+  <div class="section-title"><span class="num">4</span> Service Layering</div>
+  <p class="section-desc">A strict three-layer architecture: API → Service → Backend Clients, with cross-cutting job engine and secret manager.</p>
+
+  <h3>Responsibility boundaries</h3>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Layer</th><th>Responsibility</th><th>Key Dependencies</th></tr></thead>
+    <tbody>
+      <tr><td><strong>API Layer</strong><br/><span class="badge badge-blue">FastAPI</span></td><td>HTTP routing, pydantic validation, JWT validation (JWKS), scope enforcement, request/response envelopes, RFC 9457 error mapping, Idempotency-Key dedup.</td><td>FastAPI, Starlette, Pydantic v2</td></tr>
+      <tr><td><strong>Service Layer</strong><br/><span class="badge badge-accent">Business Logic</span></td><td>Orchestration logic, job submission, credential resolution, progress tracking, result aggregation, retry/cleanup policy.</td><td>Domain models, Job Engine interface</td></tr>
+      <tr><td><strong>Backend Clients</strong><br/><span class="badge badge-purple">Cloud SDKs</span></td><td>OpenStack VM lifecycle, Kubernetes CRD management, Ansible playbook execution. One client per cloud backend.</td><td>openstacksdk, kubernetes, ansible-runner</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout callout-info">
+    <div class="callout-title">Dependency rule</div>
+    Dependencies point inward only: <strong>API → Service → Backend Clients</strong>. The service layer never imports FastAPI; backend clients never import service logic. This keeps each layer independently testable.
+  </div>
+</section>
+
+<!-- Framework -->
+<section class="section" id="framework">
+  <div class="section-title"><span class="num">5</span> Framework &amp; Technology Choices</div>
+  <p class="section-desc">FastAPI is the recommended backend framework. Here is the rationale and alternatives.</p>
+
+  <div class="card card-accent">
+    <h3>✅ Decision: FastAPI</h3>
+    <ul>
+      <li><strong>Shared schema layer.</strong> ewccli already depends on <strong>pydantic 2.x</strong>; FastAPI is built on pydantic, so models can be shared without a translation layer.</li>
+      <li><strong>Automatic OpenAPI.</strong> FastAPI generates an OpenAPI 3.x spec from route definitions — the spec in this repo is the contract both the CLI and agents consume.</li>
+      <li><strong>Native async.</strong> <code>async</code>/<code>await</code> is essential for long-running operations (VM provisioning, Ansible, DNS polling) that must not block the event loop.</li>
+      <li><strong>Dependency injection.</strong> FastAPI <code>Depends</code> maps cleanly to the service-layering model.</li>
+      <li><strong>Ecosystem.</strong> Uvicorn/Starlette, SQLAlchemy async, structured logging, OpenTelemetry.</li>
+    </ul>
+  </div>
+
+  <h4>Alternatives considered</h4>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Alternative</th><th>Verdict</th><th>Reason</th></tr></thead>
+    <tbody>
+      <tr><td>Flask</td><td><span class="badge badge-red">Rejected</span></td><td>Synchronous by default; no built-in OpenAPI generation; needs flask-smorest/apispec to reach parity.</td></tr>
+      <tr><td>Django REST Framework</td><td><span class="badge badge-red">Rejected</span></td><td>Heavier; ORM coupling; less natural fit for a stateless API service.</td></tr>
+      <tr><td>aiohttp</td><td><span class="badge badge-red">Rejected</span></td><td>Capable but smaller ecosystem; no automatic schema generation.</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- Repo Layout -->
+<section class="section" id="repo">
+  <div class="section-title"><span class="num">6</span> Repository Layout</div>
+  <p class="section-desc">A separate <code>ewc-backend</code> repository keeps the backend decoupled from the CLI.</p>
+
+  <div class="grid grid-2">
+    <div class="card">
+      <h4>📦 <code>ewc-backend</code> <span class="badge badge-purple">NEW REPO</span></h4>
+      <p>The standalone backend service: FastAPI app, service layer, backend clients, job engine, persistence, OpenAPI spec, container image, deployment artifacts.</p>
+    </div>
+    <div class="card">
+      <h4>🖥️ <code>ewccli</code> <span class="badge badge-blue">EXISTING</span></h4>
+      <p>Refactored to a thin client: HTTP calls, token management, output rendering (Rich tables). No <code>openstack</code>/<code>ansible</code>/<code>kubernetes</code> imports remain.</p>
+    </div>
+  </div>
+
+  <h4>Proposed <code>ewc-backend</code> structure</h4>
+<pre><button class="copy-btn">Copy</button><code>ewc-backend/
+├── app/
+│   ├── api/            # FastAPI routers (one per resource)
+│   │   ├── auth.py
+│   │   ├── servers.py
+│   │   ├── hub.py
+│   │   ├── keypairs.py
+│   │   ├── dns.py
+│   │   ├── s3.py
+│   │   └── jobs.py
+│   ├── services/       # Business logic / orchestration
+│   ├── clients/        # OpenStack, Kubernetes, Ansible clients
+│   ├── jobs/           # Job engine, workers, queue
+│   ├── models/         # Pydantic schemas (shared w/ OpenAPI)
+│   ├── core/           # Config, security, deps, middleware
+│   └── main.py         # App factory + ASGI entry
+├── tests/
+├── deploy/             # Containerfile, Helm chart, compose
+├── docs/               # OpenAPI spec, ADRs
+├── pyproject.toml
+└── Containerfile</code></pre>
+
+  <div class="callout callout-warn">
+    <div class="callout-title">Why a separate repo?</div>
+    Independent release cadence, independent CI/container pipeline, clean dependency boundary (the CLI no longer pulls cloud SDKs), and the backend can be deployed/operated without coupling to CLI release cycles.
+  </div>
+</section>
+
+<!-- Deployment -->
+<section class="section" id="deployment">
+  <div class="section-title"><span class="num">7</span> Deployment Topology</div>
+  <p class="section-desc">A containerized service co-located with OpenStack/K8s for low-latency cloud access.</p>
+
+  <div class="mermaid-wrap">
+<pre class="mermaid">
+flowchart LR
+  ING["🌐 Ingress<br/>TLS termination"] --> C
+  subgraph C["ewc-backend container"]
+    direction TB
+    UV["Uvicorn ASGI<br/>API workers"] --> APP["FastAPI App"]
+    APP --> W1["Job Worker"]
+    APP --> W2["Job Worker N"]
+  end
+  C --> PG[("PostgreSQL")]
+  C --> RD[("Redis")]
+  C --> OB[("OpenBao")]
+  C --> OS["☁️ OpenStack"]
+  C --> K8S["☸️ Kubernetes"]
+</pre>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="card"><h4>🐳 Containerization</h4><ul><li>Single container image (Containerfile/Dockerfile).</li><li>Uvicorn API workers + separate job worker processes.</li><li>Config via env vars (<code>SETTINGS_*</code>).</li><li>HPA on <code>rq_queue_length</code> for worker autoscaling.</li></ul></div>
+    <div class="card"><h4>🔧 Supporting services</h4><ul><li><strong>PostgreSQL</strong> — job state, outputs, persistence.</li><li><strong>Redis</strong> — job queue (RQ/ARQ) + pub/sub for log streaming.</li><li><strong>OpenBao</strong> (proposed) — secret store for OpenStack credentials &amp; kubeconfigs.</li><li><strong>Keycloak</strong> (proposed) &mdash; OIDC IdP for CLI/backend auth.</li></ul></div>
+  </div>
+  <div class="callout callout-ok">
+    <div class="callout-title">Start small, scale later</div>
+    The backend can run on a single node initially (API + workers + dependencies co-located). Components split out as scale demands — the architecture is horizontally scalable from day one.
+  </div>
+</section>
+
+<!-- Communication -->
+<section class="section" id="communication">
+  <div class="section-title"><span class="num">8</span> CLI ↔ Backend Communication</div>
+  <p class="section-desc">REST for synchronous operations; async job submission + polling/SSE for long-running work.</p>
+
+  <div class="grid grid-2">
+    <div class="card">
+      <h4>⚡ Synchronous (REST)</h4>
+      <p>Read operations and fast writes return immediately.</p>
+      <ul>
+        <li><code>GET /v1/servers</code> — list VMs</li>
+        <li><code>GET /v1/hub/items/{name}</code> — show hub item</li>
+        <li><code>POST /v1/auth/token</code> — exchange code for token</li>
+      </ul>
+      <p class="badge badge-green">HTTP 200 · &lt; 1s</p>
+    </div>
+    <div class="card">
+      <h4>🔄 Asynchronous (Job)</h4>
+      <p>Long-running operations return a job reference (<code>202</code>); client polls or streams.</p>
+      <ul>
+        <li><code>POST /v1/servers</code> → job_id</li>
+        <li><code>POST /v1/hub/items/{name}/deploy</code> → job_id</li>
+        <li><code>GET /v1/jobs/{id}</code> — poll status</li>
+        <li><code>GET /v1/jobs/{id}/logs</code> — SSE stream</li>
+      </ul>
+      <p class="badge badge-amber">HTTP 202 · minutes</p>
+    </div>
+  </div>
+
+  <div class="callout callout-info">
+    <div class="callout-title">CLI UX preserved</div>
+    The thin CLI handles the async flow transparently: submit → poll every 5s (or <code>--follow</code> for SSE streaming) → render Rich progress bar → display result. If interrupted, <code>ewc jobs show &lt;id&gt;</code> resumes.
+  </div>
+</section>
+<!-- Auth -->
+<section class="section" id="auth">
+  <div class="section-title"><span class="num">9</span> Authentication &amp; Authorization</div>
+  <p class="section-desc">Three trust boundaries: User/CLI → Backend, Agent → Backend, and Backend → OpenStack/K8s.</p>
+
+  <div class="grid grid-3">
+    <div class="card"><div class="decision"><div class="decision-icon" style="background:var(--blue-l);color:var(--blue)">👤</div><div><h4>User / CLI → Backend</h4><p>OAuth 2.0 Authorization Code + PKCE. Browser-based; a new pattern — the current CLI has no IdP integration.</p></div></div></div>
+    <div class="card"><div class="decision"><div class="decision-icon" style="background:var(--purple-l);color:var(--purple)">🤖</div><div><h4>Agent → Backend</h4><p>OAuth 2.0 Client Credentials grant with scoped API tokens.</p></div></div></div>
+    <div class="card"><div class="decision"><div class="decision-icon" style="background:var(--accent-l);color:var(--accent)">☁️</div><div><h4>Backend → Cloud</h4><p>OpenStack app credentials &amp; kubeconfigs held in a server-side secret store (proposed: OpenBao), rotated server-side — never on the client.</p></div></div></div>
+  </div>
+
+  <h3>Current state (ewccli) — long-term credentials in files</h3>
+  <div class="card card-accent">
+    <p>Today the CLI holds <strong>long-term</strong> OpenStack application credentials in <strong>files on the user's local disk</strong> (<code>~/.ewccli/profiles</code>, plaintext INI). The user obtains application credentials manually from the EWC web portal and provides them directly to <code>ewc login</code> via CLI arguments, environment variables (<code>OS_APPLICATION_CREDENTIAL_ID</code> / <code>OS_APPLICATION_CREDENTIAL_SECRET</code>), interactive prompts, or an existing <code>~/.config/openstack/clouds.yaml</code>. There is no identity provider, no OIDC, and no token ceremony. The CLI persists the credentials to disk and, on every later command, reads them and calls OpenStack / Kubernetes <strong>directly</strong> — there is no backend.</p>
+    <p><span class="badge badge-accent">Experiment only</span> An <strong>OpenBao JWT login</strong> path was explored as an experiment but is <strong>not part of the production CLI</strong> and is <strong>not how any user authenticates today</strong>. It informed the target secret-store decision below; it is not the current production flow.</p>
+    <p class="badge badge-red">Problems: long-term credentials on disk in plaintext; rotation forces every user to re-login; no per-user revocation; no client-side expiry tracking (only discovered on 401/403).</p>
+  </div>
+
+  <div class="mermaid-wrap">
+<pre class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant P as EWC Portal<br/>(web UI)
+  participant C as ewccli
+  participant F as ~/.ewccli/profiles<br/>(plaintext INI)
+  participant OS as OpenStack<br/>(Keystone)
+  participant K8s as Kubernetes
+
+  Note over U,P: Step 1 — User obtains credentials manually
+  U->>P: Log in to EWC web portal
+  P-->>U: Application Credential ID + Secret
+
+  Note over U,F: Step 2 — ewc login saves credentials to disk
+  U->>C: ewc login --application-credential-id ...<br/>--application-credential-secret ...<br/>--tenant-name ... --federee ... --region ...
+  Note over C: No IdP, no OIDC, no browser redirect<br/>Credentials entered directly (args / env / prompt / clouds.yaml)
+  C->>F: configparser.write(<br/>application_credential_id,<br/>application_credential_secret,<br/>federee, region, tenant_name,<br/>ssh key paths)
+  Note over F: Long-term credentials stored<br/>in PLAINTEXT — persist between sessions
+
+  Note over U,K8s: Step 3 — Subsequent commands read creds, call cloud directly
+  U->>C: ewc infra list (later session)
+  C->>F: configparser.read(profiles)
+  F-->>C: application_credential_id + secret
+  C->>OS: openstack.connect(app_credential_id, secret)<br/>list servers
+  OS-->>C: server list
+  C-->>U: Rich table output
+
+  U->>C: ewc dns create (another command)
+  C->>F: read kubeconfig path
+  C->>K8s: apply DNS CRD (kubeconfig)
+  K8s-->>C: OK
+
+  Note over F,OS: No backend, no token refresh,<br/>no server-side rotation.<br/>Credentials persist on disk until manually deleted.
+</pre>
+  </div>
+
+  <h3>Current → Target transition</h3>
+  <p class="section-desc">The migration moves long-term cloud credentials <em>off the client</em> and onto the backend; the CLI keeps only a short-lived backend token.</p>
+  <div class="mermaid-wrap">
+<pre class="mermaid">
+flowchart LR
+  subgraph NOW["Current state"]
+    C1["ewccli"] -->|"reads long-term creds"| F1[("~/.ewccli/profiles")]
+    C1 -->|"direct SDK calls"| OS1["OpenStack / K8s"]
+  end
+  subgraph FUTURE["Target state"]
+    C2["ewccli (thin client)"] -->|"Bearer token only"| B["ewc-backend"]
+    B -->|"reads rotated creds"| SM[("Secret Store<br/>(proposed: OpenBao)")]
+    B -->|"server-side calls"| OS2["OpenStack / K8s"]
+  end
+  NOW ==>|"migration"| FUTURE
+</pre>
+  </div>
+
+  <h3>Target: User / CLI authentication flow</h3>
+  <p class="section-desc">No cloud credentials ever reach the client. The CLI holds only a short-lived backend token; the backend holds and rotates the OpenStack credentials.</p>
+  <div class="mermaid-wrap">
+<pre class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant C as ewccli (thin client)
+  participant K as Keycloak
+  participant B as ewc-backend
+  participant SM as Secret Store (proposed)
+  participant OS as OpenStack
+  Note over C,OS: TARGET STATE — no cloud credentials on the client
+  U->>C: ewc login
+  C->>K: OIDC auth-code + PKCE (browser)
+  U->>K: Credentials / SSO
+  K-->>C: access_token (15m) + refresh_token (8h)
+  Note over C: refresh_token goes to OS keychain (NOT cloud creds)
+  Note over C: NO OpenStack credentials stored locally
+  U->>C: ewc server create ...
+  C->>B: POST /v1/servers (Bearer token, Idempotency-Key)
+  B->>B: validate JWT (JWKS) + check scope servers:write
+  B->>SM: read OpenStack app credential (per tenant)
+  B->>OS: create VM (server-side, short-lived conn)
+  OS-->>B: accepted
+  B-->>C: 202 Accepted (job_id, status: pending)
+  Note over C,B: CLI may disconnect, job persists on backend
+  C->>B: GET /v1/jobs/id/logs (SSE)
+  B-->>C: stream: provisioning ... done
+  Note over C: if access_token expired then auto-refresh via refresh_token
+</pre>
+  </div>
+
+  <h4>Token lifecycle</h4>
+  <ul>
+    <li>Access tokens are short-lived (15 min default, configurable).</li>
+    <li>Refresh tokens are long-lived (8 h) and stored in the <strong>OS keychain</strong>, not plaintext on disk.</li>
+    <li>The CLI auto-refreshes before expiry. <code>--no-browser</code> mode prints the auth URL for headless/SSH.</li>
+    <li><strong>Key difference from today:</strong> the token is a <em>backend</em> token, not an OpenStack credential. Cloud credentials never touch the client.</li>
+  </ul>
+
+  <h4>Backend as OAuth2 resource server</h4>
+  <p>The backend validates incoming JWTs using Keycloak's public keys (JWKS) — no database lookup needed. Validation checks: signature, <code>exp</code>, <code>iss</code>, <code>aud</code>, and scope claims. The backend then resolves the caller's tenant, reads the matching OpenStack credential from the secret store, and opens a short-lived server-side connection.</p>
+</section>
+
+<!-- Agent Auth -->
+<section class="section" id="agent-auth">
+  <div class="section-title"><span class="num">10</span> Agent Authorization</div>
+  <p class="section-desc">AI agents authenticate via OAuth2 client credentials and are authorized with scoped, revocable API tokens.</p>
+
+  <div class="mermaid-wrap">
+<pre class="mermaid">
+sequenceDiagram
+  participant A as AI Agent
+  participant K as Keycloak
+  participant B as ewc-backend
+  Note over A,K: One-time: admin registers agent as OAuth2 client
+  A->>K: POST /token (client_id + secret, grant=client_credentials)
+  K-->>A: scoped access_token (servers:write, jobs:read, ...)
+  A->>B: POST /v1/servers (Bearer token, Idempotency-Key)
+  B->>B: Validate JWT + enforce scopes
+  B-->>A: 202 { job_id, status: pending }
+  A->>B: GET /v1/jobs/{job_id}/logs (Accept: text/event-stream)
+  B-->>A: SSE stream: progress + logs
+  A->>B: GET /v1/jobs/{job_id}
+  B-->>A: 200 { status: completed, result: {...} }
+</pre>
+  </div>
+
+  <h3>Scope model</h3>
+  <p>Permissions are encoded as OAuth2 scopes in the JWT. The backend enforces scope-based authorization on every endpoint.</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Scope</th><th>Endpoints</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>profile:read</code></td><td><code>GET /v1/profiles</code></td><td>View own profiles</td></tr>
+      <tr><td><code>profile:write</code></td><td><code>POST/PUT /v1/profiles</code></td><td>Create/update profiles</td></tr>
+      <tr><td><code>servers:read</code></td><td><code>GET /v1/servers</code></td><td>List/show servers</td></tr>
+      <tr><td><code>servers:write</code></td><td><code>POST/DELETE /v1/servers</code></td><td>Create/delete/reconfigure servers</td></tr>
+      <tr><td><code>hub:read</code></td><td><code>GET /v1/hub/items</code></td><td>List/show hub items</td></tr>
+      <tr><td><code>hub:deploy</code></td><td><code>POST /v1/hub/items/{name}/deploy</code></td><td>Deploy hub items</td></tr>
+      <tr><td><code>dns:read</code> / <code>dns:write</code></td><td>DNS records endpoints</td><td>List/create/delete DNS records</td></tr>
+      <tr><td><code>s3:read</code> / <code>s3:write</code></td><td>S3 bucket endpoints</td><td>List/create/delete S3 buckets</td></tr>
+      <tr><td><code>keypairs:read</code> / <code>keypairs:write</code></td><td>Keypair endpoints</td><td>List/create/delete keypairs</td></tr>
+      <tr><td><code>jobs:read</code> / <code>jobs:cancel</code></td><td>Job endpoints</td><td>View job status/logs; cancel jobs</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="pc-grid">
+    <div class="card">
+      <h4>🤖 Agent-friendly design</h4>
+      <ul>
+        <li><strong>OpenAPI as tool definition.</strong> The spec doubles as the agent's tool schema — agents discover endpoints, parameters, and responses programmatically.</li>
+        <li><strong>Predictable envelopes.</strong> Every response uses <code>{ data, meta: { request_id } }</code>; every error uses RFC 9457 problem details with machine-readable <code>code</code>.</li>
+        <li><strong>Idempotency.</strong> <code>Idempotency-Key</code> header lets agents retry safely after network failures without duplicate resources.</li>
+        <li><strong>Async-first.</strong> Long operations return <code>202</code> + <code>job_id</code>; agents poll or subscribe to SSE.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>🔐 Agent authorization</h4>
+      <ul>
+        <li><strong>Registration:</strong> admin registers agent as OAuth2 client in Keycloak (or scoped API token via admin API).</li>
+        <li><strong>Scoping:</strong> client assigned specific scopes based on what the agent may do.</li>
+        <li><strong>Token acquisition:</strong> <code>client_credentials</code> grant → scoped access token.</li>
+        <li><strong>Enforcement:</strong> every request carries Bearer token; backend validates + enforces scopes per endpoint.</li>
+        <li><strong>Revocation:</strong> API tokens are revocable; client secrets stored in secret manager.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- Credentials -->
+<section class="section" id="credentials">
+  <div class="section-title"><span class="num">11</span> OpenStack Credential Rotation</div>
+  <p class="section-desc"><strong>Target (proposed):</strong> credentials live in a server-side secret store — never on client disk — and the backend rotates them automatically. OpenBao is the recommended store but is <strong>not</strong> in production today (the current CLI keeps long-term credentials in local files and has no OpenBao integration).</p>
+
+  <h3>Credential storage</h3>
+  <p>OpenStack application credentials are stored in <strong>OpenBao</strong> KV2 (proposed), not the database or client disk. OpenBao is recommended because the team has experimental familiarity with it; the service layer talks to an abstract <code>SecretStore</code> port so it is swappable.</p>
+  <div class="card">
+    <h4>Secret-store alternatives considered</h4>
+    <ul>
+      <li><strong>Kubernetes Secrets + Sealed Secrets / SOPS</strong> — no new component if already on K8s; GitOps-friendly. No dynamic secrets; hand-built rotation.</li>
+      <li><strong>Cloud managed secret manager (e.g. Barbican)</strong> — fully managed, native to OpenStack. Vendor lock-in; control-plane latency.</li>
+      <li><strong>PostgreSQL + envelope encryption (KMS)</strong> — fewest new components; transactions with job state. Must build key rotation, audit, and policy from scratch.</li>
+    </ul>
+  </div>
+<pre><button class="copy-btn">Copy</button><code># Secret path convention
+ewc-backend/data/openstack-credentials/{federee}/{region}/{tenant_id}
+
+# Payload
+{
+  "application_credential_id": "...",
+  "application_credential_secret": "...",
+  "auth_url": "https://keystone...",
+  "federee": "EUMETSAT",
+  "region": "ECIS-R1",
+  "created_at": "2026-07-01T10:00:00Z",
+  "expires_at": null,
+  "last_rotated_at": "2026-07-01T10:00:00Z",
+  "rotation_count": 0
+}</code></pre>
+
+  <h3>Automated rotation (daily scheduler)</h3>
+  <div class="mermaid-wrap">
+<pre class="mermaid">
+flowchart TD
+  SCH["⏰ Daily Scheduler"] --> LIST["List credentials in OpenBao"]
+  LIST --> CHK{"Older than<br/>rotation threshold?<br/>(default 30 days)"}
+  CHK -->|"No"| SKIP["Skip"]
+  CHK -->|"Yes"| A1["Auth to OpenStack<br/>with current credential"]
+  A1 --> A2["Create new application<br/>credential via Identity API"]
+  A2 --> A3["Store new credential<br/>in OpenBao (new KV2 version)"]
+  A3 --> A4["Delete old credential<br/>from OpenStack"]
+  A4 --> A5["Update metadata:<br/>last_rotated_at, rotation_count++"]
+  A5 --> GRACE["In-flight jobs using<br/>old cred allowed to finish"]
+</pre>
+  </div>
+
+  <div class="callout callout-warn">
+    <div class="callout-title">Expiry detection</div>
+    If OpenStack returns 401/403 for a credential, the backend marks it <code>expired</code> in OpenBao, returns <code>CREDENTIAL_EXPIRED</code> (HTTP 401), triggers an immediate rotation attempt, and alerts ops if rotation fails.
+  </div>
+
+  <h4>Security considerations</h4>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Concern</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td>Token theft (CLI)</td><td>Refresh tokens in OS keychain; short-lived access tokens</td></tr>
+      <tr><td>Token theft (agent)</td><td>Client secrets in secret manager; short-lived tokens; revocable API tokens</td></tr>
+      <tr><td>OpenStack cred exposure</td><td>Stored in OpenBao, never sent to client; connections created server-side only</td></tr>
+      <tr><td>OpenBao compromise</td><td>HA cluster with mTLS; audit logging; least-privilege backend service token</td></tr>
+      <tr><td>Privilege escalation</td><td>Scopes enforced per-endpoint; admin operations require <code>admin</code> scope</td></tr>
+      <tr><td>Replay attacks</td><td><code>Idempotency-Key</code> deduplication; nonces for sensitive operations</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+<!-- Jobs -->
+<section class="section" id="jobs">
+  <div class="section-title"><span class="num">12</span> Job Execution Model</div>
+  <p class="section-desc">Long-running operations run as async jobs — submitted, tracked, streamed, and persisted.</p>
+
+  <h3>Why async?</h3>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Operation</th><th>Typical Duration</th><th>Current Behavior</th></tr></thead>
+    <tbody>
+      <tr><td>VM creation (OpenStack)</td><td>2–10 min</td><td>Blocks terminal</td></tr>
+      <tr><td>Hub-item deployment (VM + Ansible)</td><td>5–20 min</td><td>Blocks terminal</td></tr>
+      <tr><td>DNS record resolution check</td><td>up to 20 min</td><td>20 min timeout (<code>DNS_CHECK_TIMEOUT_MINUTES</code>)</td></tr>
+      <tr><td>VM deletion</td><td>1–5 min</td><td>Blocks terminal</td></tr>
+      <tr><td>DNS / S3 CRD creation</td><td>&lt; 30 s</td><td>Blocks terminal</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout callout-danger">
+    <div class="callout-title">Current pain</div>
+    The CLI blocks the terminal for the entire duration. If killed, the operation is lost with no way to check status or retrieve results. The backend solves this with an <strong>asynchronous job model</strong>.
+  </div>
+</section>
+
+<!-- Job Lifecycle -->
+<section class="section" id="job-lifecycle">
+  <div class="section-title"><span class="num">13</span> Job Lifecycle</div>
+  <p class="section-desc">Six states from submission to terminal retention.</p>
+
+  <div class="mermaid-wrap">
+<pre class="mermaid">
+stateDiagram-v2
+  [*] --> pending
+  pending --> running: worker picks up
+  pending --> cancelled: user cancel
+  running --> completed: success
+  running --> failed: error
+  running --> cancelled: user cancel
+  running --> failed: timeout
+  completed --> [*]
+  failed --> [*]
+  cancelled --> [*]
+</pre>
+  </div>
+
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>State</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><span class="badge badge-gray">pending</span></td><td>Job accepted, queued, not yet started by a worker</td></tr>
+      <tr><td><span class="badge badge-blue">running</span></td><td>Worker is executing the job</td></tr>
+      <tr><td><span class="badge badge-green">completed</span></td><td>Job finished successfully; result available</td></tr>
+      <tr><td><span class="badge badge-red">failed</span></td><td>Job finished with an error; error details available</td></tr>
+      <tr><td><span class="badge badge-amber">cancelled</span></td><td>Job cancelled by user/admin before or during execution</td></tr>
+      <tr><td><span class="badge badge-purple">timeout</span></td><td>Job exceeded its timeout limit (subtype of failed)</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Job submission</h3>
+  <p>Long-running operations are submitted via <code>POST</code> and return <code>202 Accepted</code> with a job reference.</p>
+<pre><button class="copy-btn">Copy</button><code>POST /v1/servers
+Content-Type: application/json
+Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
+
+{
+  "server_name": "my-vm",
+  "image_name": "Rocky-9",
+  "flavour_name": "4cpu-4gbmem",
+  "networks": ["private"],
+  "security_groups": ["ssh"],
+  "keypair_name": "my-keypair",
+  "external_ip": false,
+  "dry_run": false,
+  "force": false
+}</code></pre>
+<pre><button class="copy-btn">Copy</button><code>// 202 Accepted
+{
+  "data": {
+    "job_id": "job_01HZX...",
+    "status": "pending",
+    "resource_type": "server",
+    "resource_name": "my-vm",
+    "operation": "create",
+    "created_at": "2026-07-03T12:00:00Z",
+    "estimated_duration_seconds": 600
+  },
+  "meta": { "request_id": "req_abc123" }
+}</code></pre>
+
+  <h3>Job status query</h3>
+<pre><button class="copy-btn">Copy</button><code>GET /v1/jobs/job_01HZX...
+
+// 200 — while running
+{
+  "data": {
+    "job_id": "job_01HZX...",
+    "status": "running",
+    "progress": 45,
+    "progress_message": "Waiting for server to become active...",
+    "estimated_remaining_seconds": 330,
+    "timeout_at": "2026-07-03T12:20:05Z"
+  },
+  "meta": { "request_id": "req_def456" }
+}</code></pre>
+</section>
+
+<!-- Job Streaming -->
+<section class="section" id="job-streaming">
+  <div class="section-title"><span class="num">14</span> Logs &amp; Progress Streaming</div>
+  <p class="section-desc">Workers publish to Redis pub/sub; API bridges to SSE clients. Logs are also persisted for later polling.</p>
+
+  <div class="mermaid-wrap">
+<pre class="mermaid">
+sequenceDiagram
+  participant C as CLI / Agent
+  participant API as API Layer
+  participant Q as Redis Queue
+  participant W as Job Worker
+  participant DB as PostgreSQL
+  participant PS as Redis PubSub
+  C->>API: POST /v1/servers (Idempotency-Key)
+  API->>Q: enqueue job
+  API->>DB: persist job (pending)
+  API-->>C: 202 { job_id }
+  Q->>W: dequeue job
+  W->>DB: update job (running)
+  W->>PS: publish progress / log events
+  C->>API: GET /v1/jobs/{id}/logs (SSE)
+  API->>PS: subscribe
+  PS-->>API: log events
+  API-->>C: SSE stream (real-time)
+  W->>DB: update job (completed + result)
+  C->>API: GET /v1/jobs/{id}
+  API-->>C: 200 { status: completed, result: {...} }
+</pre>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="card">
+      <h4>🏗️ Architecture</h4>
+      <ul>
+        <li><strong>Queue:</strong> Redis-backed job queue (RQ or ARQ). API workers enqueue; job workers dequeue.</li>
+        <li><strong>Persistence:</strong> Job state (status, progress, result, error) in PostgreSQL — survives restarts.</li>
+        <li><strong>Streaming:</strong> Workers publish log/progress to Redis pub/sub. API bridges pub/sub → SSE. Logs also persisted to PostgreSQL for polling.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>🔁 Retry &amp; idempotency</h4>
+      <ul>
+        <li><strong>Transient failures</strong> (503, network timeout): retried up to 3× with exponential backoff.</li>
+        <li><strong>Permanent failures</strong> (quota exceeded, invalid image): no retry; marked <code>failed</code> with details.</li>
+        <li><strong>Idempotency-Key:</strong> if a job with that key exists &amp; is active → return existing; if terminal → return original result; else create new (202). Safe retries, no duplicates.</li>
+        <li><strong>Worker concurrency:</strong> one job per worker; horizontal scaling via HA on <code>rq_queue_length</code>.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout callout-info">
+    <div class="callout-title">CLI integration</div>
+    Submit → poll <code>GET /v1/jobs/{id}</code> every 5s → render Rich progress bar → (optional) <code>--follow</code> opens SSE → display result on completion. If interrupted: <code>ewc jobs show &lt;id&gt;</code> or <code>ewc jobs list</code> to resume.
+  </div>
+</section>
+<!-- API Explorer -->
+<section class="section" id="api">
+  <div class="section-title"><span class="num">15</span> Interactive API Explorer</div>
+  <p class="section-desc">The full OpenAPI 3.1 specification rendered as an interactive, try-it-out reference. Loaded on demand.</p>
+  <div class="callout callout-info">
+    <div class="callout-title">Self-contained</div>
+    The spec is embedded directly in this page — no server required. Click any endpoint to expand parameters, request body, and response schemas. Use <strong>Try it out</strong> to send live requests (requires a running backend).
+  </div>
+  <div id="swagger-ui">
+    <div class="swagger-placeholder" id="swagger-placeholder">
+      <div class="spin"></div>
+      <p>Loading API explorer…</p>
+      <p style="font-size:12px">If this persists, the page may be offline (CDN unreachable).</p>
+    </div>
+  </div>
+</section>
+
+<!-- Capabilities -->
+<section class="section" id="capabilities">
+  <div class="section-title"><span class="num">16</span> CLI Capability Map</div>
+  <p class="section-desc">Every current ewccli capability mapped to a backend API endpoint.</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>CLI Command</th><th>API Endpoint</th><th>Mode</th></tr></thead>
+    <tbody>
+      <tr><td><code>ewc login</code></td><td><code>POST /v1/auth/token</code></td><td><span class="badge badge-green">Sync</span></td></tr>
+      <tr><td><code>ewc infra create</code></td><td><code>POST /v1/servers</code></td><td><span class="badge badge-amber">Async</span></td></tr>
+      <tr><td><code>ewc infra list</code></td><td><code>GET /v1/servers</code></td><td><span class="badge badge-green">Sync</span></td></tr>
+      <tr><td><code>ewc infra show</code></td><td><code>GET /v1/servers/{name}</code></td><td><span class="badge badge-green">Sync</span></td></tr>
+      <tr><td><code>ewc infra delete</code></td><td><code>DELETE /v1/servers/{name}</code></td><td><span class="badge badge-amber">Async</span></td></tr>
+      <tr><td><code>ewc infra create --force</code></td><td><code>POST /v1/servers/{name}/reconfigure</code></td><td><span class="badge badge-amber">Async</span></td></tr>
+      <tr><td><code>ewc hub list</code></td><td><code>GET /v1/hub/items</code></td><td><span class="badge badge-green">Sync</span></td></tr>
+      <tr><td><code>ewc hub show</code></td><td><code>GET /v1/hub/items/{name}</code></td><td><span class="badge badge-green">Sync</span></td></tr>
+      <tr><td><code>ewc hub deploy</code></td><td><code>POST /v1/hub/items/{name}/deploy</code></td><td><span class="badge badge-amber">Async</span></td></tr>
+      <tr><td>keypair create</td><td><code>POST /v1/keypairs</code></td><td><span class="badge badge-amber">Async</span></td></tr>
+      <tr><td>keypair delete</td><td><code>DELETE /v1/keypairs/{name}</code></td><td><span class="badge badge-amber">Async</span></td></tr>
+      <tr><td><code>ewc dns create</code></td><td><code>POST /v1/dns/records</code></td><td><span class="badge badge-amber">Async</span></td></tr>
+      <tr><td><code>ewc dns get</code></td><td><code>GET /v1/dns/records</code></td><td><span class="badge badge-green">Sync</span></td></tr>
+      <tr><td><code>ewc dns describe</code></td><td><code>GET /v1/dns/records/{name}</code></td><td><span class="badge badge-green">Sync</span></td></tr>
+      <tr><td><code>ewc dns delete</code></td><td><code>DELETE /v1/dns/records/{name}</code></td><td><span class="badge badge-amber">Async</span></td></tr>
+      <tr><td><code>ewc s3 bucket create</code></td><td><code>POST /v1/s3/buckets</code></td><td><span class="badge badge-amber">Async</span></td></tr>
+      <tr><td><code>ewc s3 bucket get</code></td><td><code>GET /v1/s3/buckets</code></td><td><span class="badge badge-green">Sync</span></td></tr>
+      <tr><td><code>ewc s3 bucket delete</code></td><td><code>DELETE /v1/s3/buckets/{name}</code></td><td><span class="badge badge-amber">Async</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- Consequences -->
+<section class="section" id="consequences">
+  <div class="section-title"><span class="num">17</span> Consequences</div>
+  <p class="section-desc">Trade-offs of the target architecture, with mitigations.</p>
+
+  <div class="pc-grid">
+    <div class="pc pos">
+      <h4>✅ Positive</h4>
+      <ul>
+        <li><strong>Centralized credentials:</strong> OpenStack app creds live in a server-side secret store (proposed: OpenBao), not on laptops. Rotation is invisible to CLI users.</li>
+        <li><strong>Resumable operations:</strong> long-running jobs survive CLI disconnects; users reconnect and check status.</li>
+        <li><strong>Single source of truth:</strong> all business logic in one service, testable in isolation, with a versioned OpenAPI contract.</li>
+        <li><strong>Agent-ready:</strong> AI agents discover, plan, and execute via structured HTTP + OpenAPI — no terminal scraping.</li>
+        <li><strong>Multi-consumer:</strong> future web UIs, CI pipelines, and orchestration tools all consume the same API.</li>
+      </ul>
+    </div>
+    <div class="pc neg">
+      <h4>⚠️ Negative</h4>
+      <ul>
+        <li><strong>Infrastructure overhead:</strong> backend requires PostgreSQL, Redis, OpenBao, container orchestration.</li>
+        <li><strong>Network dependency:</strong> CLI requires network access to backend; offline operation no longer possible.</li>
+        <li><strong>Latency:</strong> extra HTTP hop per operation (mitigated by co-location with OpenStack/K8s).</li>
+        <li><strong>Migration effort:</strong> ewccli must be rewritten as thin client; existing profiles need migration.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h4>Mitigations</h4>
+  <ul>
+    <li>The backend is containerized and can run on a single node initially; components split out as scale demands.</li>
+    <li>The CLI can cache read responses (server lists, hub items) for short-term offline use.</li>
+    <li>A migration tool converts existing <code>~/.ewccli/profiles</code> entries to backend-managed profiles.</li>
+  </ul>
+</section>
+
+<!-- Alternatives -->
+<section class="section" id="alternatives">
+  <div class="section-title"><span class="num">18</span> Alternatives Considered</div>
+  <p class="section-desc">Options that were evaluated and rejected, with reasoning.</p>
+
+  <div class="card">
+    <h4>1. Keep all logic in the CLI <span class="badge badge-red">Rejected</span></h4>
+    <p>Does not solve credential exposure, resumability, or multi-consumer access. The CLI remains the only integration point.</p>
+  </div>
+  <div class="card">
+    <h4>2. CLI + shared library (no service) <span class="badge badge-red">Rejected</span></h4>
+    <p>Package business logic as a Python library that both the CLI and other tools import. Does not solve credential management, job persistence, or agent access — library consumers must still manage their own OpenStack/K8s connections and credential lifecycle.</p>
+  </div>
+  <div class="card">
+    <h4>3. Serverless functions (Lambda/Functions) <span class="badge badge-red">Rejected</span></h4>
+    <p>Ansible playbooks and OpenStack operations can run for many minutes; serverless timeouts (typically 15 min) are too tight for some operations (DNS check timeout is 20 min). Cold starts add latency to interactive operations; debugging is harder.</p>
+  </div>
+  <div class="card">
+    <h4>4. GraphQL instead of REST <span class="badge badge-red">Rejected</span></h4>
+    <p>REST + OpenAPI is the lingua franca for AI agent tool-use. GraphQL adds query-language complexity that does not benefit the resource-oriented, CRUD-like operations of this domain. The OpenAPI spec doubles as the agent tool definition.</p>
+  </div>
+
+  <div class="callout callout-info">
+    <div class="callout-title">📖 Open questions (future phases)</div>
+    <ul style="margin-bottom:0">
+      <li><strong>Multi-tenancy isolation:</strong> separate backend per federee, or one backend with tenant isolation? (Phase 2)</li>
+      <li><strong>Job retention:</strong> how long to keep completed jobs/logs? (Proposal: 30 days, configurable)</li>
+      <li><strong>Webhook callbacks:</strong> for job completion in addition to polling/SSE? (Phase 2)</li>
+      <li><strong>Rate limiting:</strong> per-agent limits to prevent runaway automation? (Phase 2)</li>
+    </ul>
+  </div>
+</section>
+
+</div><!-- /content -->
+
+<div class="footer">
+  ewc-backend Architecture &amp; API Contract · ADR-001 · Phase 1 (KAM-6) · Generated 2026-07-03
+  &nbsp;·&nbsp; <a href="openapi.yaml">OpenAPI spec</a> · <a href="ADR-001-target-architecture.md">ADR</a> · <a href="auth-authorization-model.md">Auth model</a> · <a href="job-execution-model.md">Job model</a>
+</div>
+</div><!-- /main -->
+
+<!-- Diagram Lightbox -->
+<div class="lightbox-overlay" id="diagramLightbox">
+  <div class="lightbox-info" id="lightboxInfo"></div>
+  <div class="lightbox-toolbar">
+    <button class="lightbox-btn" id="lbZoomOut" title="Zoom out">&minus;</button>
+    <button class="lightbox-btn wide" id="lbZoomReset" title="Fit to screen">Fit</button>
+    <button class="lightbox-btn" id="lbZoomIn" title="Zoom in">+</button>
+    <button class="lightbox-btn" id="lbClose" title="Close">&times;</button>
+  </div>
+  <div class="lightbox-stage" id="lightboxStage"></div>
+  <div class="lightbox-hint">Scroll to zoom &middot; Drag to pan &middot; Esc to close</div>
+</div>
+<button class="mobile-toggle" id="mobileToggle" aria-label="Toggle navigation">☰</button>
+<!-- Mermaid (CDN) -->
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    securityLevel: 'loose',
+    themeVariables: dark ? {
+      primaryColor:'#1a2236', primaryTextColor:'#e6e9f2', primaryBorderColor:'#4f46e5',
+      lineColor:'#6b748a', secondaryColor:'#131a2a', tertiaryColor:'#1a2236',
+      fontSize:'15px', fontFamily:'-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif'
+    } : {
+      primaryColor:'#eef2ff', primaryTextColor:'#1a1f2e', primaryBorderColor:'#4f46e5',
+      lineColor:'#5a6378', secondaryColor:'#f7f8fb', tertiaryColor:'#f1f3f9',
+      fontSize:'15px', fontFamily:'-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif'
+    }
+  });
+  window._mermaidReady = mermaid;
+</script>
+
+<!-- Swagger UI (CDN, lazy-loaded) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+
+<script>
+/* Embedded OpenAPI 3.1 spec (inlined at build time) */
+const OPENAPI_SPEC = {"openapi": "3.1.0", "info": {"title": "EWC Backend API", "version": "1.0.0", "description": "REST API for the European Weather Cloud (EWC) backend service.\n\nThis API extracts all business logic from `ewccli` into a standalone\nbackend. The CLI and AI agents interact with infrastructure\n(OpenStack, Kubernetes, Ansible) exclusively through these endpoints.\n\n## Authentication\n\nAll endpoints require a Bearer token obtained via OAuth 2.0\n(authorization code + PKCE for human users; client credentials for\nagents) or a scoped API token.\n\n## Long-Running Operations\n\nMutating operations (create, delete, deploy) are asynchronous. They\nreturn `202 Accepted` with a `job_id`. Poll\n`GET /v1/jobs/{job_id}` for status, or stream logs via\n`GET /v1/jobs/{job_id}/logs` (SSE).\n\n## Idempotency\n\nAll mutating endpoints accept an `Idempotency-Key` header. Submitting\nthe same key within 24 hours returns the original response, enabling\nsafe retries.\n\n## Dry Run\n\nAll mutating endpoints accept a `dry_run` query parameter. When\n`true`, the planned action is returned without executing.\n", "contact": {"name": "EWC Support", "email": "support@europeanweather.cloud"}, "license": {"name": "GPL-3.0-or-later", "url": "https://www.gnu.org/licenses/gpl-3.0.html"}}, "servers": [{"url": "https://api.ewc-backend.europeanweather.cloud", "description": "Production"}, {"url": "https://api-val.ewc-backend.europeanweather.cloud", "description": "Validation / Staging"}], "security": [{"bearerAuth": []}], "tags": [{"name": "Auth", "description": "Authentication and login flows"}, {"name": "Profiles", "description": "CLI profile management"}, {"name": "Servers", "description": "OpenStack VM lifecycle (create, list, show, delete, reconfigure)"}, {"name": "Hub", "description": "EWC Community Hub items (list, show, deploy)"}, {"name": "Keypairs", "description": "OpenStack SSH keypairs"}, {"name": "DNS", "description": "DNS record management (Kubernetes CRD)"}, {"name": "S3", "description": "S3 bucket management (Kubernetes CRD)"}, {"name": "Jobs", "description": "Long-running job status, logs, and outputs"}, {"name": "Capabilities", "description": "API discovery for AI agents"}], "paths": {"/v1/capabilities": {"get": {"tags": ["Capabilities"], "summary": "List API capabilities", "description": "Returns a machine-readable catalog of available operations,\ntheir parameters, and expected durations. Designed for AI agent\ndiscovery and planning.\n", "operationId": "listCapabilities", "security": [], "responses": {"200": {"description": "Capabilities catalog", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CapabilitiesResponse"}}}}}}}, "/v1/auth/login": {"get": {"tags": ["Auth"], "summary": "Initiate OIDC login", "description": "Returns the Keycloak authorization URL (auth code + PKCE).\nThe CLI opens this URL in a browser (or prints it with\n`no_browser=true`). After the user authenticates, Keycloak\nredirects to the backend callback.\n", "operationId": "initiateLogin", "security": [], "parameters": [{"name": "no_browser", "in": "query", "schema": {"type": "boolean", "default": false}, "description": "If true, return the URL for headless/SSH environments."}, {"name": "profile", "in": "query", "schema": {"type": "string"}, "description": "Profile name to associate with this login session."}], "responses": {"200": {"description": "Authorization URL", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LoginInitResponse"}}}}}}}, "/v1/auth/callback": {"get": {"tags": ["Auth"], "summary": "OIDC callback endpoint", "description": "Receives the authorization code from Keycloak after user\nauthentication. Exchanges the code for access and refresh tokens.\n", "operationId": "authCallback", "security": [], "parameters": [{"name": "code", "in": "query", "required": true, "schema": {"type": "string"}}, {"name": "state", "in": "query", "required": true, "schema": {"type": "string"}}], "responses": {"302": {"description": "Redirect to CLI with token info", "headers": {"Location": {"schema": {"type": "string", "format": "uri"}}}}}}}, "/v1/auth/token": {"post": {"tags": ["Auth"], "summary": "Exchange code or refresh token", "description": "Exchanges an authorization code for access/refresh tokens, or\nrefreshes an expired access token using a refresh token.\n", "operationId": "exchangeToken", "security": [], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TokenRequest"}}}}, "responses": {"200": {"description": "Token response", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TokenResponse"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}}}}, "/v1/auth/logout": {"post": {"tags": ["Auth"], "summary": "Logout / revoke token", "description": "Revokes the current access and refresh tokens.", "operationId": "logout", "responses": {"204": {"description": "Successfully logged out"}}}}, "/v1/profiles": {"get": {"tags": ["Profiles"], "summary": "List profiles", "operationId": "listProfiles", "security": [{"bearerAuth": ["profile:read"]}], "responses": {"200": {"description": "List of profiles", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/Profile"}}}}}}}}}, "post": {"tags": ["Profiles"], "summary": "Create a profile", "description": "Creates a new profile associating the authenticated user with an\nOpenStack tenant (federee, region, tenant_name). The backend\nretrieves and stores OpenStack credentials in OpenBao.\n", "operationId": "createProfile", "security": [{"bearerAuth": ["profile:write"]}], "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProfileCreate"}}}}, "responses": {"201": {"description": "Profile created", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/Profile"}}}}}}, "409": {"description": "Profile already exists", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProblemDetail"}}}}}}}, "/v1/profiles/{profileId}": {"parameters": [{"$ref": "#/components/parameters/ProfileId"}], "get": {"tags": ["Profiles"], "summary": "Show a profile", "operationId": "showProfile", "security": [{"bearerAuth": ["profile:read"]}], "responses": {"200": {"description": "Profile details", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/Profile"}}}}}}, "404": {"$ref": "#/components/responses/NotFound"}}}, "put": {"tags": ["Profiles"], "summary": "Update a profile", "description": "Refreshes credentials or updates SSH key paths.", "operationId": "updateProfile", "security": [{"bearerAuth": ["profile:write"]}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProfileUpdate"}}}}, "responses": {"200": {"description": "Updated profile", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/Profile"}}}}}}}}, "delete": {"tags": ["Profiles"], "summary": "Delete a profile", "description": "Removes the profile and rotates/deletes stored credentials.", "operationId": "deleteProfile", "security": [{"bearerAuth": ["profile:write"]}], "responses": {"204": {"description": "Profile deleted"}, "404": {"$ref": "#/components/responses/NotFound"}}}}, "/v1/servers": {"get": {"tags": ["Servers"], "summary": "List OpenStack servers", "description": "Lists compute servers. By default, only servers created by\newccli (metadata `deployed=ewccli`) are shown. Use\n`show_all=true` to list all servers.\n", "operationId": "listServers", "security": [{"bearerAuth": ["servers:read"]}], "parameters": [{"name": "show_all", "in": "query", "schema": {"type": "boolean", "default": false}, "description": "List all VMs regardless of creator."}, {"$ref": "#/components/parameters/Limit"}, {"$ref": "#/components/parameters/Cursor"}], "responses": {"200": {"description": "List of servers", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/ServerSummary"}}, "meta": {"$ref": "#/components/schemas/PaginationMeta"}}}}}}}}, "post": {"tags": ["Servers"], "summary": "Create a server (async)", "description": "Creates an OpenStack VM. This is a long-running operation\n(typically 2–10 minutes). Returns `202 Accepted` with a job\nreference.\n\nIf `force=true` and the server already exists with different\nconfiguration, the server is deleted and recreated with the new\nconfiguration (reconfigure). If `force=false` and the server\nexists with different config, a conflict error is returned with\na diff of the changes.\n", "operationId": "createServer", "security": [{"bearerAuth": ["servers:write"]}], "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/DryRun"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ServerCreate"}}}}, "responses": {"202": {"description": "Job accepted", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/JobRef"}}}}}}, "409": {"description": "Server exists with different configuration (no force)", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ServerConflict"}}}}}}}, "/v1/servers/{serverName}": {"parameters": [{"$ref": "#/components/parameters/ServerName"}], "get": {"tags": ["Servers"], "summary": "Show server details", "operationId": "showServer", "security": [{"bearerAuth": ["servers:read"]}], "responses": {"200": {"description": "Server details", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/ServerDetail"}}}}}}, "404": {"$ref": "#/components/responses/NotFound"}}}, "delete": {"tags": ["Servers"], "summary": "Delete a server (async)", "description": "Deletes an OpenStack VM. If the server was not created by\newccli, `force=true` is required. This is an async operation.\n", "operationId": "deleteServer", "security": [{"bearerAuth": ["servers:write"]}], "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/DryRun"}, {"name": "force", "in": "query", "schema": {"type": "boolean", "default": false}, "description": "Force deletion of non-ewccli servers."}], "responses": {"202": {"description": "Deletion job accepted", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/JobRef"}}}}}}, "404": {"$ref": "#/components/responses/NotFound"}}}}, "/v1/servers/{serverName}/reconfigure": {"parameters": [{"$ref": "#/components/parameters/ServerName"}], "post": {"tags": ["Servers"], "summary": "Reconfigure an existing server (async)", "description": "Reconfigures an existing server with new parameters (image,\nflavor, networks, security groups). The server is deleted and\nrecreated with the new configuration. This is an async operation.\n\nThis is equivalent to `POST /v1/servers` with `force=true` but\nis provided as a dedicated endpoint for clarity and agent\ndiscoverability.\n", "operationId": "reconfigureServer", "security": [{"bearerAuth": ["servers:write"]}], "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/DryRun"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ServerCreate"}}}}, "responses": {"202": {"description": "Reconfiguration job accepted", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/JobRef"}}}}}}, "404": {"$ref": "#/components/responses/NotFound"}}}}, "/v1/hub/items": {"get": {"tags": ["Hub"], "summary": "List hub items", "description": "Lists all EWC Community Hub items from the catalog, filtered to\nEWCCLI-compatible items.\n", "operationId": "listHubItems", "security": [{"bearerAuth": ["hub:read"]}], "parameters": [{"name": "force_refresh", "in": "query", "schema": {"type": "boolean", "default": false}, "description": "Force re-download of the catalog."}, {"$ref": "#/components/parameters/Limit"}, {"$ref": "#/components/parameters/Cursor"}], "responses": {"200": {"description": "List of hub items", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/HubItemSummary"}}, "meta": {"$ref": "#/components/schemas/PaginationMeta"}}}}}}}}}, "/v1/hub/items/{itemName}": {"parameters": [{"$ref": "#/components/parameters/HubItemName"}], "get": {"tags": ["Hub"], "summary": "Show hub item details", "description": "Shows detailed metadata for a specific hub item, including\ninputs (mandatory/optional), defaults, and deploy command\nexample.\n", "operationId": "showHubItem", "security": [{"bearerAuth": ["hub:read"]}], "responses": {"200": {"description": "Hub item details", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/HubItemDetail"}}}}}}, "404": {"$ref": "#/components/responses/NotFound"}}}}, "/v1/hub/items/{itemName}/deploy": {"parameters": [{"$ref": "#/components/parameters/HubItemName"}], "post": {"tags": ["Hub"], "summary": "Deploy a hub item (async)", "description": "Deploys an EWC Community Hub item. This involves:\n1. Provisioning a VM (if server_name is not provided or doesn't exist).\n2. Git-cloning the item source.\n3. Running the Ansible playbook.\n4. Optionally checking DNS resolution (up to 20 min).\n\nThis is a long-running operation (typically 5–20 minutes).\nReturns `202 Accepted` with a job reference.\n", "operationId": "deployHubItem", "security": [{"bearerAuth": ["hub:deploy"]}], "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/DryRun"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HubDeployRequest"}}}}, "responses": {"202": {"description": "Deployment job accepted", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/JobRef"}}}}}}}}}, "/v1/keypairs": {"get": {"tags": ["Keypairs"], "summary": "List OpenStack keypairs", "operationId": "listKeypairs", "security": [{"bearerAuth": ["keypairs:read"]}], "responses": {"200": {"description": "List of keypairs", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/Keypair"}}}}}}}}}, "post": {"tags": ["Keypairs"], "summary": "Create a keypair (async)", "description": "Creates an OpenStack keypair from an SSH public key. If the\nkeypair already exists, verifies that the public key matches.\n", "operationId": "createKeypair", "security": [{"bearerAuth": ["keypairs:write"]}], "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/DryRun"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/KeypairCreate"}}}}, "responses": {"202": {"description": "Keypair creation job accepted", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/JobRef"}}}}}}, "409": {"description": "Keypair exists with different public key", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProblemDetail"}}}}}}}, "/v1/keypairs/{keypairName}": {"parameters": [{"$ref": "#/components/parameters/KeypairName"}], "delete": {"tags": ["Keypairs"], "summary": "Delete a keypair (async)", "operationId": "deleteKeypair", "security": [{"bearerAuth": ["keypairs:write"]}], "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/DryRun"}], "responses": {"202": {"description": "Deletion job accepted", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/JobRef"}}}}}}, "404": {"$ref": "#/components/responses/NotFound"}}}}, "/v1/dns/records": {"get": {"tags": ["DNS"], "summary": "List DNS records", "description": "Lists DNS records (Kubernetes CRD) in the tenant namespace.", "operationId": "listDnsRecords", "security": [{"bearerAuth": ["dns:read"]}], "parameters": [{"$ref": "#/components/parameters/Limit"}, {"$ref": "#/components/parameters/Cursor"}], "responses": {"200": {"description": "List of DNS records", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/DnsRecord"}}, "meta": {"$ref": "#/components/schemas/PaginationMeta"}}}}}}}}, "post": {"tags": ["DNS"], "summary": "Create a DNS record (async)", "description": "Creates a DNS record via Kubernetes CRD. Supports A, AAAA,\nCNAME, and TXT record types with optional geo-redundancy.\n", "operationId": "createDnsRecord", "security": [{"bearerAuth": ["dns:write"]}], "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/DryRun"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DnsRecordCreate"}}}}, "responses": {"202": {"description": "DNS record creation job accepted", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/JobRef"}}}}}}}}}, "/v1/dns/records/{recordName}": {"parameters": [{"$ref": "#/components/parameters/DnsRecordName"}], "get": {"tags": ["DNS"], "summary": "Describe a DNS record", "operationId": "showDnsRecord", "security": [{"bearerAuth": ["dns:read"]}], "responses": {"200": {"description": "DNS record details", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/DnsRecord"}}}}}}, "404": {"$ref": "#/components/responses/NotFound"}}}, "delete": {"tags": ["DNS"], "summary": "Delete a DNS record (async)", "operationId": "deleteDnsRecord", "security": [{"bearerAuth": ["dns:write"]}], "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/DryRun"}], "responses": {"202": {"description": "Deletion job accepted", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/JobRef"}}}}}}, "404": {"$ref": "#/components/responses/NotFound"}}}}, "/v1/s3/buckets": {"get": {"tags": ["S3"], "summary": "List S3 buckets", "description": "Lists S3 buckets (Kubernetes CRD) in the tenant namespace.", "operationId": "listS3Buckets", "security": [{"bearerAuth": ["s3:read"]}], "parameters": [{"$ref": "#/components/parameters/Limit"}, {"$ref": "#/components/parameters/Cursor"}], "responses": {"200": {"description": "List of S3 buckets", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/S3Bucket"}}, "meta": {"$ref": "#/components/schemas/PaginationMeta"}}}}}}}}, "post": {"tags": ["S3"], "summary": "Create an S3 bucket (async)", "description": "Creates an S3 bucket via Kubernetes CRD with specified access\ncontrols and optional geo-redundancy.\n", "operationId": "createS3Bucket", "security": [{"bearerAuth": ["s3:write"]}], "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/DryRun"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/S3BucketCreate"}}}}, "responses": {"202": {"description": "S3 bucket creation job accepted", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/JobRef"}}}}}}}}}, "/v1/s3/buckets/{bucketName}": {"parameters": [{"$ref": "#/components/parameters/BucketName"}], "delete": {"tags": ["S3"], "summary": "Delete an S3 bucket (async)", "operationId": "deleteS3Bucket", "security": [{"bearerAuth": ["s3:write"]}], "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/DryRun"}], "responses": {"202": {"description": "Deletion job accepted", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/JobRef"}}}}}}, "404": {"$ref": "#/components/responses/NotFound"}}}}, "/v1/jobs": {"get": {"tags": ["Jobs"], "summary": "List jobs", "description": "Lists jobs for the authenticated user/tenant.", "operationId": "listJobs", "security": [{"bearerAuth": ["jobs:read"]}], "parameters": [{"name": "status", "in": "query", "schema": {"$ref": "#/components/schemas/JobStatus"}, "description": "Filter by job status."}, {"name": "resource_type", "in": "query", "schema": {"type": "string", "enum": ["server", "hub", "keypair", "dns", "s3"]}, "description": "Filter by resource type."}, {"$ref": "#/components/parameters/Limit"}, {"$ref": "#/components/parameters/Cursor"}], "responses": {"200": {"description": "List of jobs", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/Job"}}, "meta": {"$ref": "#/components/schemas/PaginationMeta"}}}}}}}}}, "/v1/jobs/{jobId}": {"parameters": [{"$ref": "#/components/parameters/JobId"}], "get": {"tags": ["Jobs"], "summary": "Get job status", "description": "Returns the current status, progress, and result (if completed).", "operationId": "getJob", "security": [{"bearerAuth": ["jobs:read"]}], "responses": {"200": {"description": "Job status", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/Job"}}}}}}, "404": {"$ref": "#/components/responses/NotFound"}}}}, "/v1/jobs/{jobId}/logs": {"parameters": [{"$ref": "#/components/parameters/JobId"}], "get": {"tags": ["Jobs"], "summary": "Get job logs", "description": "Returns job logs. Supports two modes:\n- **Polling:** `Accept: application/json` — returns paginated log\n  entries with a cursor.\n- **Streaming:** `Accept: text/event-stream` — streams log\n  entries in real-time via Server-Sent Events.\n", "operationId": "getJobLogs", "security": [{"bearerAuth": ["jobs:read"]}], "parameters": [{"name": "cursor", "in": "query", "schema": {"type": "string"}, "description": "Pagination cursor for log entries (polling mode)."}, {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 100, "minimum": 1, "maximum": 1000}, "description": "Maximum number of log entries to return (polling mode)."}, {"name": "follow", "in": "query", "schema": {"type": "boolean", "default": false}, "description": "If true, keep the connection open for new log entries (polling mode)."}], "responses": {"200": {"description": "Job logs", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"type": "object", "properties": {"logs": {"type": "array", "items": {"$ref": "#/components/schemas/LogEntry"}}, "has_more": {"type": "boolean"}, "next_cursor": {"type": "string"}}}}}}, "text/event-stream": {"schema": {"type": "string", "description": "SSE stream of log entries."}}}}, "404": {"$ref": "#/components/responses/NotFound"}}}}, "/v1/jobs/{jobId}/outputs": {"parameters": [{"$ref": "#/components/parameters/JobId"}], "get": {"tags": ["Jobs"], "summary": "Get job outputs", "description": "Returns the outputs/artifacts produced by a completed job\n(e.g., SSH connection string, Ansible logs, kubeconfig).\n", "operationId": "getJobOutputs", "security": [{"bearerAuth": ["jobs:read"]}], "responses": {"200": {"description": "Job outputs", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"type": "object", "properties": {"outputs": {"type": "array", "items": {"$ref": "#/components/schemas/JobOutput"}}}}}}}}}, "404": {"$ref": "#/components/responses/NotFound"}}}}, "/v1/jobs/{jobId}/cancel": {"parameters": [{"$ref": "#/components/parameters/JobId"}], "post": {"tags": ["Jobs"], "summary": "Cancel a running job", "description": "Sends a cancellation signal to the job worker. If the job is\npending, it is removed from the queue. If running, the worker\nattempts graceful cleanup.\n", "operationId": "cancelJob", "security": [{"bearerAuth": ["jobs:cancel"]}], "responses": {"200": {"description": "Job cancelled", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/Job"}}}}}}, "404": {"$ref": "#/components/responses/NotFound"}, "409": {"description": "Job is already in a terminal state", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProblemDetail"}}}}}}}}, "components": {"securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT", "description": "OAuth 2.0 Bearer token (JWT from Keycloak) or opaque API token\n(`ewc_...`). Include scopes in the token; the backend enforces\nper-endpoint scope requirements.\n"}}, "parameters": {"IdempotencyKey": {"name": "Idempotency-Key", "in": "header", "schema": {"type": "string", "format": "uuid"}, "description": "Unique key for idempotent requests. Submitting the same key\nwithin 24 hours returns the original response.\n"}, "DryRun": {"name": "dry_run", "in": "query", "schema": {"type": "boolean", "default": false}, "description": "If true, return the planned action without executing."}, "Limit": {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 50, "minimum": 1, "maximum": 200}, "description": "Maximum number of items to return."}, "Cursor": {"name": "cursor", "in": "query", "schema": {"type": "string"}, "description": "Pagination cursor from a previous response."}, "ProfileId": {"name": "profileId", "in": "path", "required": true, "schema": {"type": "string"}, "description": "Profile name or ID."}, "ServerName": {"name": "serverName", "in": "path", "required": true, "schema": {"type": "string"}, "description": "OpenStack server name."}, "HubItemName": {"name": "itemName", "in": "path", "required": true, "schema": {"type": "string"}, "description": "Hub item name (from `GET /v1/hub/items`)."}, "KeypairName": {"name": "keypairName", "in": "path", "required": true, "schema": {"type": "string"}, "description": "OpenStack keypair name."}, "DnsRecordName": {"name": "recordName", "in": "path", "required": true, "schema": {"type": "string"}, "description": "DNS record name."}, "BucketName": {"name": "bucketName", "in": "path", "required": true, "schema": {"type": "string"}, "description": "S3 bucket name."}, "JobId": {"name": "jobId", "in": "path", "required": true, "schema": {"type": "string"}, "description": "Job identifier."}}, "responses": {"BadRequest": {"description": "Invalid request", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProblemDetail"}}}}, "NotFound": {"description": "Resource not found", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProblemDetail"}}}}, "Unauthorized": {"description": "Authentication required or token expired", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ProblemDetail"}}}}}, "schemas": {"ProblemDetail": {"type": "object", "description": "RFC 9457 problem detail with EWC-specific extensions.", "properties": {"type": {"type": "string", "format": "uri"}, "title": {"type": "string"}, "status": {"type": "integer"}, "detail": {"type": "string"}, "instance": {"type": "string"}, "code": {"type": "string", "description": "Machine-readable error code (e.g., CREDENTIAL_EXPIRED)."}, "retryable": {"type": "boolean", "description": "Whether the client should retry the request."}, "required_scopes": {"type": "array", "items": {"type": "string"}, "description": "Required OAuth2 scopes (for 403 errors)."}}}, "PaginationMeta": {"type": "object", "properties": {"request_id": {"type": "string"}, "pagination": {"type": "object", "properties": {"limit": {"type": "integer"}, "next_cursor": {"type": "string", "nullable": true}}}}}, "LoginInitResponse": {"type": "object", "properties": {"data": {"type": "object", "properties": {"authorization_url": {"type": "string", "format": "uri"}, "state": {"type": "string"}, "profile": {"type": "string"}}}}}, "TokenRequest": {"type": "object", "properties": {"grant_type": {"type": "string", "enum": ["authorization_code", "refresh_token", "client_credentials"]}, "code": {"type": "string", "description": "Authorization code (for authorization_code grant)."}, "refresh_token": {"type": "string", "description": "Refresh token (for refresh_token grant)."}, "client_id": {"type": "string"}, "client_secret": {"type": "string"}, "redirect_uri": {"type": "string", "format": "uri"}}}, "TokenResponse": {"type": "object", "properties": {"access_token": {"type": "string"}, "refresh_token": {"type": "string"}, "token_type": {"type": "string", "example": "Bearer"}, "expires_in": {"type": "integer", "example": 900}, "scope": {"type": "string", "example": "servers:read servers:write hub:read hub:deploy"}}}, "Profile": {"type": "object", "properties": {"profile_id": {"type": "string"}, "federee": {"type": "string", "enum": ["ECMWF", "EUMETSAT"]}, "region": {"type": "string", "enum": ["CC1", "CC2", "WAW3-1", "ECIS-R1", "ECIS-R2"]}, "tenant_name": {"type": "string"}, "ssh_public_key_path": {"type": "string"}, "ssh_private_key_path": {"type": "string"}, "kubeconfig_path": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"}}}, "ProfileCreate": {"type": "object", "required": ["federee", "region", "tenant_name"], "properties": {"federee": {"type": "string", "enum": ["ECMWF", "EUMETSAT"]}, "region": {"type": "string", "enum": ["CC1", "CC2", "WAW3-1", "ECIS-R1", "ECIS-R2"]}, "tenant_name": {"type": "string"}, "ssh_public_key_path": {"type": "string"}, "ssh_private_key_path": {"type": "string"}}}, "ProfileUpdate": {"type": "object", "properties": {"ssh_public_key_path": {"type": "string"}, "ssh_private_key_path": {"type": "string"}, "refresh_credentials": {"type": "boolean", "default": false, "description": "Force re-retrieval of OpenStack credentials from OpenBao."}}}, "ServerSummary": {"type": "object", "properties": {"name": {"type": "string"}, "status": {"type": "string", "example": "ACTIVE"}, "networks": {"type": "string", "description": "Comma-separated network names with IPs."}, "flavor": {"type": "string"}, "id": {"type": "string", "format": "uuid"}}}, "ServerDetail": {"type": "object", "properties": {"name": {"type": "string"}, "id": {"type": "string", "format": "uuid"}, "status": {"type": "string"}, "flavor": {"type": "string"}, "image": {"type": "string"}, "networks": {"type": "array", "items": {"type": "object", "properties": {"network": {"type": "string"}, "addresses": {"type": "array", "items": {"type": "string"}}}}}, "security_groups": {"type": "array", "items": {"type": "string"}}, "keypair": {"type": "string"}, "internal_ip": {"type": "string", "nullable": true}, "external_ip": {"type": "string", "nullable": true}, "created_at": {"type": "string", "format": "date-time"}}}, "ServerCreate": {"type": "object", "required": ["server_name"], "properties": {"server_name": {"type": "string", "maxLength": 63}, "image_name": {"type": "string", "description": "Short image name (e.g., Rocky-9) or full name.", "default": "Rocky-9"}, "flavour_name": {"type": "string", "description": "OpenStack flavor name. Defaults to per-federee/region CPU flavor."}, "networks": {"type": "array", "items": {"type": "string"}, "description": "Network names. Defaults to 'private'."}, "security_groups": {"type": "array", "items": {"type": "string"}, "description": "Security group names. Defaults to 'ssh'."}, "keypair_name": {"type": "string", "description": "OpenStack keypair name. Auto-generated if omitted."}, "external_ip": {"type": "boolean", "default": false, "description": "Assign a floating IP to the server."}, "force": {"type": "boolean", "default": false, "description": "Force recreation if server exists with different config."}, "ssh_public_key_path": {"type": "string", "description": "Path to SSH public key (on backend filesystem)."}, "ssh_private_key_path": {"type": "string", "description": "Path to SSH private key (on backend filesystem)."}}}, "ServerConflict": {"type": "object", "properties": {"code": {"type": "string", "example": "SERVER_CONFIG_CONFLICT"}, "server_name": {"type": "string"}, "diffs": {"type": "array", "items": {"type": "object", "properties": {"field": {"type": "string"}, "current": {"type": "string"}, "requested": {"type": "string"}}}}, "message": {"type": "string", "description": "Use force=true to reconfigure."}}}, "HubItemSummary": {"type": "object", "properties": {"name": {"type": "string"}, "title": {"type": "string"}, "version": {"type": "string"}, "summary": {"type": "string"}, "annotations": {"type": "object", "properties": {"technology": {"type": "array", "items": {"type": "string"}, "example": ["Ansible Playbook"]}, "category": {"type": "array", "items": {"type": "string"}, "example": ["GPU-accelerated"]}, "other": {"type": "array", "items": {"type": "string"}, "example": ["EWCCLI-compatible"]}}}}}, "HubItemDetail": {"type": "object", "properties": {"name": {"type": "string"}, "title": {"type": "string"}, "version": {"type": "string"}, "summary": {"type": "string"}, "description": {"type": "string"}, "sources": {"type": "array", "items": {"type": "object", "properties": {"type": {"type": "string", "enum": ["git", "path"]}, "url": {"type": "string"}, "ref": {"type": "string"}}}}, "ewccli": {"type": "object", "properties": {"inputs": {"type": "array", "items": {"$ref": "#/components/schemas/HubItemInput"}}, "default_image_name": {"type": "string"}, "default_security_groups": {"type": "array", "items": {"type": "string"}}, "path_to_main_file": {"type": "string"}, "path_to_requirements_file": {"type": "string"}, "external_ip": {"type": "boolean"}, "check_dns": {"type": "boolean"}}}, "deploy_command": {"type": "string", "description": "Example deploy command."}}}, "HubItemInput": {"type": "object", "properties": {"name": {"type": "string"}, "description": {"type": "string"}, "required": {"type": "boolean"}, "default": {"description": "Default value if the input is not provided."}}}, "HubDeployRequest": {"type": "object", "required": ["item"], "properties": {"item": {"type": "string", "description": "Hub item name."}, "server_name": {"type": "string", "description": "Server name to deploy on. Auto-generated if omitted."}, "item_inputs": {"type": "array", "items": {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}}}, "description": "Key-value pairs for item-specific inputs."}, "image_name": {"type": "string"}, "flavour_name": {"type": "string"}, "networks": {"type": "array", "items": {"type": "string"}}, "security_groups": {"type": "array", "items": {"type": "string"}}, "keypair_name": {"type": "string"}, "external_ip": {"type": "boolean", "default": false}, "force": {"type": "boolean", "default": false}, "ssh_public_key_path": {"type": "string"}, "ssh_private_key_path": {"type": "string"}}}, "Keypair": {"type": "object", "properties": {"name": {"type": "string"}, "fingerprint": {"type": "string"}, "public_key": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}}}, "KeypairCreate": {"type": "object", "required": ["keypair_name"], "properties": {"keypair_name": {"type": "string"}, "public_key": {"type": "string", "description": "SSH public key content (not path, since backend holds it)."}, "force": {"type": "boolean", "default": false, "description": "Delete existing keypair and recreate if names conflict."}}}, "DnsRecord": {"type": "object", "properties": {"name": {"type": "string"}, "namespace": {"type": "string"}, "domain_name": {"type": "string"}, "record_name": {"type": "string"}, "records": {"type": "array", "items": {"type": "string"}}, "ttl": {"type": "integer", "example": 300}, "record_type": {"type": "string", "enum": ["A", "AAAA", "CNAME", "TXT"]}, "geo_enabled": {"type": "boolean"}, "health_endpoint": {"type": "string"}, "geo_ssl": {"type": "boolean"}, "created_at": {"type": "string", "format": "date-time"}, "status": {"type": "object", "description": "Kubernetes CRD status conditions."}}}, "DnsRecordCreate": {"type": "object", "required": ["domain_name", "record_name", "records"], "properties": {"domain_name": {"type": "string"}, "record_name": {"type": "string"}, "records": {"type": "array", "items": {"type": "string"}}, "ttl": {"type": "integer", "default": 300}, "record_type": {"type": "string", "enum": ["A", "AAAA", "CNAME", "TXT"], "default": "A"}, "geo_enabled": {"type": "boolean", "default": false}, "health_endpoint": {"type": "string", "default": "/"}, "geo_ssl": {"type": "boolean", "default": false}}}, "S3Bucket": {"type": "object", "properties": {"name": {"type": "string"}, "namespace": {"type": "string"}, "owner": {"type": "string"}, "write_access_ids": {"type": "array", "items": {"type": "string"}}, "read_access_ids": {"type": "array", "items": {"type": "string"}}, "geo_enabled": {"type": "boolean"}, "created_at": {"type": "string", "format": "date-time"}, "status": {"type": "object"}}}, "S3BucketCreate": {"type": "object", "required": ["bucket_name", "access_id"], "properties": {"bucket_name": {"type": "string"}, "access_id": {"type": "string", "description": "Owner access ID."}, "write_access_ids": {"type": "array", "items": {"type": "string"}}, "write_access_refs_ids": {"type": "array", "items": {"type": "string"}}, "read_access_ids": {"type": "array", "items": {"type": "string"}}, "read_access_refs_ids": {"type": "array", "items": {"type": "string"}}, "geo_enabled": {"type": "boolean", "default": false}}}, "JobRef": {"type": "object", "properties": {"job_id": {"type": "string"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "resource_type": {"type": "string", "enum": ["server", "hub", "keypair", "dns", "s3"]}, "resource_name": {"type": "string"}, "operation": {"type": "string", "enum": ["create", "delete", "deploy", "reconfigure", "dns_check"]}, "created_at": {"type": "string", "format": "date-time"}, "estimated_duration_seconds": {"type": "integer"}}}, "JobStatus": {"type": "string", "enum": ["pending", "running", "completed", "failed", "cancelled", "timeout"]}, "Job": {"type": "object", "properties": {"job_id": {"type": "string"}, "status": {"$ref": "#/components/schemas/JobStatus"}, "resource_type": {"type": "string", "enum": ["server", "hub", "keypair", "dns", "s3"]}, "resource_name": {"type": "string"}, "operation": {"type": "string", "enum": ["create", "delete", "deploy", "reconfigure", "dns_check"]}, "created_at": {"type": "string", "format": "date-time"}, "started_at": {"type": "string", "format": "date-time", "nullable": true}, "completed_at": {"type": "string", "format": "date-time", "nullable": true}, "progress": {"type": "integer", "minimum": 0, "maximum": 100}, "progress_message": {"type": "string"}, "estimated_remaining_seconds": {"type": "integer", "nullable": true}, "timeout_at": {"type": "string", "format": "date-time", "nullable": true}, "result": {"description": "Job result (present when status is completed)."}, "error": {"$ref": "#/components/schemas/JobError"}, "idempotency_key": {"type": "string", "nullable": true}}}, "JobError": {"type": "object", "properties": {"code": {"type": "string", "example": "SERVER_CREATE_FAILED"}, "message": {"type": "string"}, "retryable": {"type": "boolean"}, "details": {"type": "object", "additionalProperties": true}}}, "LogEntry": {"type": "object", "properties": {"timestamp": {"type": "string", "format": "date-time"}, "level": {"type": "string", "enum": ["debug", "info", "warning", "error"]}, "message": {"type": "string"}, "source": {"type": "string", "description": "Component that produced the log (e.g., openstack, ansible, dns)."}}}, "JobOutput": {"type": "object", "properties": {"name": {"type": "string", "example": "ssh_command"}, "type": {"type": "string", "enum": ["text", "log", "json", "file"]}, "value": {"type": "string"}}}, "CapabilitiesResponse": {"type": "object", "properties": {"data": {"type": "object", "properties": {"version": {"type": "string"}, "operations": {"type": "array", "items": {"type": "object", "properties": {"method": {"type": "string", "enum": ["GET", "POST", "PUT", "DELETE"]}, "path": {"type": "string"}, "summary": {"type": "string"}, "async": {"type": "boolean"}, "required_scopes": {"type": "array", "items": {"type": "string"}}, "estimated_duration_seconds": {"type": "integer", "nullable": true}, "supports_dry_run": {"type": "boolean"}}}}}}}}}}};
+
+/* ---- Theme toggle ---- */
+(function(){
+  const saved = localStorage.getItem('ewc-theme');
+  if (saved) document.documentElement.setAttribute('data-theme', saved);
+  const btn = document.getElementById('themeToggle');
+  function sync(){ const d = document.documentElement.getAttribute('data-theme')==='dark'; btn.textContent = d ? '☀️' : '🌙'; }
+  sync();
+  btn.addEventListener('click', ()=>{
+    const cur = document.documentElement.getAttribute('data-theme');
+    const next = cur==='dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('ewc-theme', next);
+    sync();
+    location.reload();
+  });
+})();
+
+/* ---- Mobile sidebar ---- */
+(function(){
+  const sb = document.getElementById('sidebar');
+  const tg = document.getElementById('mobileToggle');
+  tg.addEventListener('click', ()=> sb.classList.toggle('open'));
+  document.querySelectorAll('.nav-item').forEach(a=> a.addEventListener('click', ()=> sb.classList.remove('open')));
+})();
+
+/* ---- Scroll-spy active nav ---- */
+(function(){
+  const items = [...document.querySelectorAll('.nav-item')];
+  const sections = items.map(a => document.querySelector(a.getAttribute('href'))).filter(Boolean);
+  function onScroll(){
+    const pos = window.scrollY + 120;
+    let idx = 0;
+    for (let i=0;i<sections.length;i++){ if (sections[i].offsetTop <= pos) idx = i; }
+    items.forEach((a,i)=> a.classList.toggle('active', i===idx));
+  }
+  window.addEventListener('scroll', onScroll, {passive:true});
+  onScroll();
+})();
+
+/* ---- Copy buttons ---- */
+(function(){
+  document.querySelectorAll('pre').forEach(pre=>{
+    const btn = pre.querySelector('.copy-btn');
+    if (!btn) return;
+    btn.addEventListener('click', ()=>{
+      const code = pre.querySelector('code') ? pre.querySelector('code').innerText : pre.innerText;
+      navigator.clipboard.writeText(code).then(()=>{
+        const t = btn.textContent; btn.textContent='✓ Copied'; setTimeout(()=>btn.textContent=t,1500);
+      });
+    });
+  });
+})();
+
+/* ---- Lazy-load Swagger UI when API section is visible ---- */
+(function(){
+  const target = document.getElementById('swagger-ui');
+  if (!target) return;
+  let loaded = false;
+  function loadSwagger(){
+    if (loaded || typeof SwaggerUIBundle === 'undefined') return;
+    loaded = true;
+    const ph = document.getElementById('swagger-placeholder');
+    if (ph) ph.remove();
+    SwaggerUIBundle({
+      spec: OPENAPI_SPEC,
+      dom_id: '#swagger-ui',
+      presets: [SwaggerUIBundle.presets.apis],
+      layout: 'BaseLayout',
+      deepLinking: true,
+      defaultModelsExpandDepth: 1,
+      defaultModelExpandDepth: 2,
+      docExpansion: 'list',
+      filter: true,
+      syntaxHighlight: { activated: true, theme: 'agate' }
+    });
+  }
+  function loadScript(src, cb){
+    const s = document.createElement('script');
+    s.src = src; s.onload = cb; document.head.appendChild(s);
+  }
+  function init(){
+    if ('IntersectionObserver' in window){
+      const io = new IntersectionObserver((entries)=>{
+        entries.forEach(e=>{ if (e.isIntersecting && !loaded){ loadScript('https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js', loadSwagger); io.disconnect(); } });
+      }, {rootMargin:'200px'});
+      io.observe(target);
+    } else {
+      loadScript('https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js', loadSwagger);
+    }
+  }
+  init();
+})();
+</script>
+<!-- Diagram Lightbox Script -->
+<script>
+(function(){
+  var lb = document.getElementById('diagramLightbox');
+  var stage = document.getElementById('lightboxStage');
+  var info = document.getElementById('lightboxInfo');
+  var zoom = 1, panX = 0, panY = 0;
+  var isDragging = false, hasMoved = false, dragStartX = 0, dragStartY = 0;
+
+  function updateTransform(){
+    var svg = stage.querySelector('svg');
+    if(svg) svg.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + zoom + ')';
+  }
+
+  function fitToScreen(){
+    var svg = stage.querySelector('svg');
+    if(!svg) return;
+    var vb = svg.viewBox && svg.viewBox.baseVal;
+    var natW, natH;
+    if(vb && vb.width){
+      natW = vb.width; natH = vb.height;
+    } else {
+      svg.style.transform = '';
+      var r = svg.getBoundingClientRect();
+      natW = r.width; natH = r.height;
+    }
+    var sw = stage.clientWidth, sh = stage.clientHeight;
+    zoom = Math.min(sw / natW, sh / natH, 1);
+    if(zoom < 0.12) zoom = 0.12;
+    panX = (sw - natW) / 2;
+    panY = (sh - natH) / 2;
+    updateTransform();
+  }
+
+  function openLightbox(svgOrig, label){
+    var clone = svgOrig.cloneNode(true);
+    var vb = clone.viewBox && clone.viewBox.baseVal;
+    if(vb && vb.width){
+      clone.setAttribute('width', vb.width);
+      clone.setAttribute('height', vb.height);
+      clone.style.width = vb.width + 'px';
+      clone.style.height = vb.height + 'px';
+    }
+    clone.style.maxWidth = 'none';
+    clone.style.transform = '';
+    stage.innerHTML = '';
+    stage.appendChild(clone);
+    info.textContent = label || 'Diagram';
+    zoom = 1; panX = 0; panY = 0;
+    lb.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    requestAnimationFrame(function(){ fitToScreen(); });
+  }
+
+  function closeLightbox(){
+    lb.classList.remove('open');
+    document.body.style.overflow = '';
+    stage.innerHTML = '';
+  }
+
+  function attachHandlers(){
+    var wraps = document.querySelectorAll('.mermaid-wrap');
+    wraps.forEach(function(wrap, idx){
+      if(wrap._lbAttached) return;
+      wrap._lbAttached = true;
+      wrap.addEventListener('click', function(){
+        var svg = wrap.querySelector('svg');
+        if(!svg) return;
+        var label = 'Diagram ' + (idx + 1);
+        var node = wrap.previousElementSibling;
+        while(node){
+          var tn = node.tagName;
+          if(tn === 'H3' || tn === 'H4' || (node.classList && node.classList.contains('section-title'))){
+            label = node.textContent.replace(/^\d+/, '').trim();
+            break;
+          }
+          node = node.previousElementSibling;
+        }
+        openLightbox(svg, label);
+      });
+    });
+  }
+
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', attachHandlers);
+  } else {
+    attachHandlers();
+  }
+  setTimeout(attachHandlers, 1500);
+
+  document.getElementById('lbZoomIn').addEventListener('click', function(e){
+    e.stopPropagation(); zoom = Math.min(zoom * 1.25, 6); updateTransform();
+  });
+  document.getElementById('lbZoomOut').addEventListener('click', function(e){
+    e.stopPropagation(); zoom = Math.max(zoom / 1.25, 0.12); updateTransform();
+  });
+  document.getElementById('lbZoomReset').addEventListener('click', function(e){
+    e.stopPropagation(); fitToScreen();
+  });
+  document.getElementById('lbClose').addEventListener('click', function(e){
+    e.stopPropagation(); closeLightbox();
+  });
+
+  lb.addEventListener('click', function(e){
+    if(e.target === lb) closeLightbox();
+  });
+
+  document.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && lb.classList.contains('open')) closeLightbox();
+  });
+
+  stage.addEventListener('wheel', function(e){
+    e.preventDefault();
+    var d = e.deltaY > 0 ? 0.9 : 1.1;
+    zoom = Math.max(0.12, Math.min(zoom * d, 6));
+    updateTransform();
+  }, {passive:false});
+
+  stage.addEventListener('mousedown', function(e){
+    isDragging = true; hasMoved = false;
+    dragStartX = e.clientX - panX;
+    dragStartY = e.clientY - panY;
+    stage.classList.add('dragging');
+  });
+  document.addEventListener('mousemove', function(e){
+    if(!isDragging) return;
+    hasMoved = true;
+    panX = e.clientX - dragStartX;
+    panY = e.clientY - dragStartY;
+    updateTransform();
+  });
+  document.addEventListener('mouseup', function(){
+    if(isDragging){ isDragging = false; stage.classList.remove('dragging'); }
+  });
+
+  stage.addEventListener('touchstart', function(e){
+    if(e.touches.length === 1){
+      isDragging = true; hasMoved = false;
+      dragStartX = e.touches[0].clientX - panX;
+      dragStartY = e.touches[0].clientY - panY;
+    }
+  }, {passive:true});
+  stage.addEventListener('touchmove', function(e){
+    if(!isDragging || e.touches.length !== 1) return;
+    e.preventDefault();
+    hasMoved = true;
+    panX = e.touches[0].clientX - dragStartX;
+    panY = e.touches[0].clientY - dragStartY;
+    updateTransform();
+  }, {passive:false});
+  stage.addEventListener('touchend', function(){ isDragging = false; });
+})();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,1847 @@
+openapi: 3.1.0
+info:
+  title: EWC Backend API
+  version: 1.0.0
+  description: |
+    REST API for the European Weather Cloud (EWC) backend service.
+
+    This API extracts all business logic from `ewccli` into a standalone
+    backend. The CLI and AI agents interact with infrastructure
+    (OpenStack, Kubernetes, Ansible) exclusively through these endpoints.
+
+    ## Authentication
+
+    All endpoints require a Bearer token obtained via OAuth 2.0
+    (authorization code + PKCE for human users; client credentials for
+    agents) or a scoped API token.
+
+    ## Long-Running Operations
+
+    Mutating operations (create, delete, deploy) are asynchronous. They
+    return `202 Accepted` with a `job_id`. Poll
+    `GET /v1/jobs/{job_id}` for status, or stream logs via
+    `GET /v1/jobs/{job_id}/logs` (SSE).
+
+    ## Idempotency
+
+    All mutating endpoints accept an `Idempotency-Key` header. Submitting
+    the same key within 24 hours returns the original response, enabling
+    safe retries.
+
+    ## Dry Run
+
+    All mutating endpoints accept a `dry_run` query parameter. When
+    `true`, the planned action is returned without executing.
+  contact:
+    name: EWC Support
+    email: support@europeanweather.cloud
+  license:
+    name: GPL-3.0-or-later
+    url: https://www.gnu.org/licenses/gpl-3.0.html
+
+servers:
+  - url: https://api.ewc-backend.europeanweather.cloud
+    description: Production
+  - url: https://api-val.ewc-backend.europeanweather.cloud
+    description: Validation / Staging
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Auth
+    description: Authentication and login flows
+  - name: Profiles
+    description: CLI profile management
+  - name: Servers
+    description: OpenStack VM lifecycle (create, list, show, delete, reconfigure)
+  - name: Hub
+    description: EWC Community Hub items (list, show, deploy)
+  - name: Keypairs
+    description: OpenStack SSH keypairs
+  - name: DNS
+    description: DNS record management (Kubernetes CRD)
+  - name: S3
+    description: S3 bucket management (Kubernetes CRD)
+  - name: Jobs
+    description: Long-running job status, logs, and outputs
+  - name: Capabilities
+    description: API discovery for AI agents
+
+paths:
+  # ──────────────────────────────────────────────────────────
+  # Capabilities (agent discovery)
+  # ──────────────────────────────────────────────────────────
+  /v1/capabilities:
+    get:
+      tags: [Capabilities]
+      summary: List API capabilities
+      description: |
+        Returns a machine-readable catalog of available operations,
+        their parameters, and expected durations. Designed for AI agent
+        discovery and planning.
+      operationId: listCapabilities
+      security: []
+      responses:
+        '200':
+          description: Capabilities catalog
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilitiesResponse'
+
+  # ──────────────────────────────────────────────────────────
+  # Auth
+  # ──────────────────────────────────────────────────────────
+  /v1/auth/login:
+    get:
+      tags: [Auth]
+      summary: Initiate OIDC login
+      description: |
+        Returns the Keycloak authorization URL (auth code + PKCE).
+        The CLI opens this URL in a browser (or prints it with
+        `no_browser=true`). After the user authenticates, Keycloak
+        redirects to the backend callback.
+      operationId: initiateLogin
+      security: []
+      parameters:
+        - name: no_browser
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: If true, return the URL for headless/SSH environments.
+        - name: profile
+          in: query
+          schema:
+            type: string
+          description: Profile name to associate with this login session.
+      responses:
+        '200':
+          description: Authorization URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginInitResponse'
+
+  /v1/auth/callback:
+    get:
+      tags: [Auth]
+      summary: OIDC callback endpoint
+      description: |
+        Receives the authorization code from Keycloak after user
+        authentication. Exchanges the code for access and refresh tokens.
+      operationId: authCallback
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to CLI with token info
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+
+  /v1/auth/token:
+    post:
+      tags: [Auth]
+      summary: Exchange code or refresh token
+      description: |
+        Exchanges an authorization code for access/refresh tokens, or
+        refreshes an expired access token using a refresh token.
+      operationId: exchangeToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRequest'
+      responses:
+        '200':
+          description: Token response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout / revoke token
+      description: Revokes the current access and refresh tokens.
+      operationId: logout
+      responses:
+        '204':
+          description: Successfully logged out
+
+  # ──────────────────────────────────────────────────────────
+  # Profiles
+  # ──────────────────────────────────────────────────────────
+  /v1/profiles:
+    get:
+      tags: [Profiles]
+      summary: List profiles
+      operationId: listProfiles
+      security:
+        - bearerAuth: [profile:read]
+      responses:
+        '200':
+          description: List of profiles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Profile'
+    post:
+      tags: [Profiles]
+      summary: Create a profile
+      description: |
+        Creates a new profile associating the authenticated user with an
+        OpenStack tenant (federee, region, tenant_name). The backend
+        retrieves and stores OpenStack credentials in OpenBao.
+      operationId: createProfile
+      security:
+        - bearerAuth: [profile:write]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileCreate'
+      responses:
+        '201':
+          description: Profile created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Profile'
+        '409':
+          description: Profile already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+
+  /v1/profiles/{profileId}:
+    parameters:
+      - $ref: '#/components/parameters/ProfileId'
+    get:
+      tags: [Profiles]
+      summary: Show a profile
+      operationId: showProfile
+      security:
+        - bearerAuth: [profile:read]
+      responses:
+        '200':
+          description: Profile details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Profile'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Profiles]
+      summary: Update a profile
+      description: Refreshes credentials or updates SSH key paths.
+      operationId: updateProfile
+      security:
+        - bearerAuth: [profile:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileUpdate'
+      responses:
+        '200':
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Profile'
+    delete:
+      tags: [Profiles]
+      summary: Delete a profile
+      description: Removes the profile and rotates/deletes stored credentials.
+      operationId: deleteProfile
+      security:
+        - bearerAuth: [profile:write]
+      responses:
+        '204':
+          description: Profile deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ──────────────────────────────────────────────────────────
+  # OpenStack Servers
+  # ──────────────────────────────────────────────────────────
+  /v1/servers:
+    get:
+      tags: [Servers]
+      summary: List OpenStack servers
+      description: |
+        Lists compute servers. By default, only servers created by
+        ewccli (metadata `deployed=ewccli`) are shown. Use
+        `show_all=true` to list all servers.
+      operationId: listServers
+      security:
+        - bearerAuth: [servers:read]
+      parameters:
+        - name: show_all
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: List all VMs regardless of creator.
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List of servers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ServerSummary'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+    post:
+      tags: [Servers]
+      summary: Create a server (async)
+      description: |
+        Creates an OpenStack VM. This is a long-running operation
+        (typically 2–10 minutes). Returns `202 Accepted` with a job
+        reference.
+
+        If `force=true` and the server already exists with different
+        configuration, the server is deleted and recreated with the new
+        configuration (reconfigure). If `force=false` and the server
+        exists with different config, a conflict error is returned with
+        a diff of the changes.
+      operationId: createServer
+      security:
+        - bearerAuth: [servers:write]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DryRun'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServerCreate'
+      responses:
+        '202':
+          description: Job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/JobRef'
+        '409':
+          description: Server exists with different configuration (no force)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServerConflict'
+
+  /v1/servers/{serverName}:
+    parameters:
+      - $ref: '#/components/parameters/ServerName'
+    get:
+      tags: [Servers]
+      summary: Show server details
+      operationId: showServer
+      security:
+        - bearerAuth: [servers:read]
+      responses:
+        '200':
+          description: Server details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ServerDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Servers]
+      summary: Delete a server (async)
+      description: |
+        Deletes an OpenStack VM. If the server was not created by
+        ewccli, `force=true` is required. This is an async operation.
+      operationId: deleteServer
+      security:
+        - bearerAuth: [servers:write]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DryRun'
+        - name: force
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Force deletion of non-ewccli servers.
+      responses:
+        '202':
+          description: Deletion job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/JobRef'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/servers/{serverName}/reconfigure:
+    parameters:
+      - $ref: '#/components/parameters/ServerName'
+    post:
+      tags: [Servers]
+      summary: Reconfigure an existing server (async)
+      description: |
+        Reconfigures an existing server with new parameters (image,
+        flavor, networks, security groups). The server is deleted and
+        recreated with the new configuration. This is an async operation.
+
+        This is equivalent to `POST /v1/servers` with `force=true` but
+        is provided as a dedicated endpoint for clarity and agent
+        discoverability.
+      operationId: reconfigureServer
+      security:
+        - bearerAuth: [servers:write]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DryRun'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServerCreate'
+      responses:
+        '202':
+          description: Reconfiguration job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/JobRef'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ──────────────────────────────────────────────────────────
+  # Hub Items
+  # ──────────────────────────────────────────────────────────
+  /v1/hub/items:
+    get:
+      tags: [Hub]
+      summary: List hub items
+      description: |
+        Lists all EWC Community Hub items from the catalog, filtered to
+        EWCCLI-compatible items.
+      operationId: listHubItems
+      security:
+        - bearerAuth: [hub:read]
+      parameters:
+        - name: force_refresh
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Force re-download of the catalog.
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List of hub items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HubItemSummary'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+
+  /v1/hub/items/{itemName}:
+    parameters:
+      - $ref: '#/components/parameters/HubItemName'
+    get:
+      tags: [Hub]
+      summary: Show hub item details
+      description: |
+        Shows detailed metadata for a specific hub item, including
+        inputs (mandatory/optional), defaults, and deploy command
+        example.
+      operationId: showHubItem
+      security:
+        - bearerAuth: [hub:read]
+      responses:
+        '200':
+          description: Hub item details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/HubItemDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/hub/items/{itemName}/deploy:
+    parameters:
+      - $ref: '#/components/parameters/HubItemName'
+    post:
+      tags: [Hub]
+      summary: Deploy a hub item (async)
+      description: |
+        Deploys an EWC Community Hub item. This involves:
+        1. Provisioning a VM (if server_name is not provided or doesn't exist).
+        2. Git-cloning the item source.
+        3. Running the Ansible playbook.
+        4. Optionally checking DNS resolution (up to 20 min).
+
+        This is a long-running operation (typically 5–20 minutes).
+        Returns `202 Accepted` with a job reference.
+      operationId: deployHubItem
+      security:
+        - bearerAuth: [hub:deploy]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DryRun'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HubDeployRequest'
+      responses:
+        '202':
+          description: Deployment job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/JobRef'
+
+  # ──────────────────────────────────────────────────────────
+  # Keypairs
+  # ──────────────────────────────────────────────────────────
+  /v1/keypairs:
+    get:
+      tags: [Keypairs]
+      summary: List OpenStack keypairs
+      operationId: listKeypairs
+      security:
+        - bearerAuth: [keypairs:read]
+      responses:
+        '200':
+          description: List of keypairs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Keypair'
+    post:
+      tags: [Keypairs]
+      summary: Create a keypair (async)
+      description: |
+        Creates an OpenStack keypair from an SSH public key. If the
+        keypair already exists, verifies that the public key matches.
+      operationId: createKeypair
+      security:
+        - bearerAuth: [keypairs:write]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DryRun'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KeypairCreate'
+      responses:
+        '202':
+          description: Keypair creation job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/JobRef'
+        '409':
+          description: Keypair exists with different public key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+
+  /v1/keypairs/{keypairName}:
+    parameters:
+      - $ref: '#/components/parameters/KeypairName'
+    delete:
+      tags: [Keypairs]
+      summary: Delete a keypair (async)
+      operationId: deleteKeypair
+      security:
+        - bearerAuth: [keypairs:write]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DryRun'
+      responses:
+        '202':
+          description: Deletion job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/JobRef'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ──────────────────────────────────────────────────────────
+  # DNS Records
+  # ──────────────────────────────────────────────────────────
+  /v1/dns/records:
+    get:
+      tags: [DNS]
+      summary: List DNS records
+      description: Lists DNS records (Kubernetes CRD) in the tenant namespace.
+      operationId: listDnsRecords
+      security:
+        - bearerAuth: [dns:read]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List of DNS records
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DnsRecord'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+    post:
+      tags: [DNS]
+      summary: Create a DNS record (async)
+      description: |
+        Creates a DNS record via Kubernetes CRD. Supports A, AAAA,
+        CNAME, and TXT record types with optional geo-redundancy.
+      operationId: createDnsRecord
+      security:
+        - bearerAuth: [dns:write]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DryRun'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DnsRecordCreate'
+      responses:
+        '202':
+          description: DNS record creation job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/JobRef'
+
+  /v1/dns/records/{recordName}:
+    parameters:
+      - $ref: '#/components/parameters/DnsRecordName'
+    get:
+      tags: [DNS]
+      summary: Describe a DNS record
+      operationId: showDnsRecord
+      security:
+        - bearerAuth: [dns:read]
+      responses:
+        '200':
+          description: DNS record details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DnsRecord'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [DNS]
+      summary: Delete a DNS record (async)
+      operationId: deleteDnsRecord
+      security:
+        - bearerAuth: [dns:write]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DryRun'
+      responses:
+        '202':
+          description: Deletion job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/JobRef'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ──────────────────────────────────────────────────────────
+  # S3 Buckets
+  # ──────────────────────────────────────────────────────────
+  /v1/s3/buckets:
+    get:
+      tags: [S3]
+      summary: List S3 buckets
+      description: Lists S3 buckets (Kubernetes CRD) in the tenant namespace.
+      operationId: listS3Buckets
+      security:
+        - bearerAuth: [s3:read]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List of S3 buckets
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/S3Bucket'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+    post:
+      tags: [S3]
+      summary: Create an S3 bucket (async)
+      description: |
+        Creates an S3 bucket via Kubernetes CRD with specified access
+        controls and optional geo-redundancy.
+      operationId: createS3Bucket
+      security:
+        - bearerAuth: [s3:write]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DryRun'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/S3BucketCreate'
+      responses:
+        '202':
+          description: S3 bucket creation job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/JobRef'
+
+  /v1/s3/buckets/{bucketName}:
+    parameters:
+      - $ref: '#/components/parameters/BucketName'
+    delete:
+      tags: [S3]
+      summary: Delete an S3 bucket (async)
+      operationId: deleteS3Bucket
+      security:
+        - bearerAuth: [s3:write]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DryRun'
+      responses:
+        '202':
+          description: Deletion job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/JobRef'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ──────────────────────────────────────────────────────────
+  # Jobs
+  # ──────────────────────────────────────────────────────────
+  /v1/jobs:
+    get:
+      tags: [Jobs]
+      summary: List jobs
+      description: Lists jobs for the authenticated user/tenant.
+      operationId: listJobs
+      security:
+        - bearerAuth: [jobs:read]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/JobStatus'
+          description: Filter by job status.
+        - name: resource_type
+          in: query
+          schema:
+            type: string
+            enum: [server, hub, keypair, dns, s3]
+          description: Filter by resource type.
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List of jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Job'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+
+  /v1/jobs/{jobId}:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    get:
+      tags: [Jobs]
+      summary: Get job status
+      description: Returns the current status, progress, and result (if completed).
+      operationId: getJob
+      security:
+        - bearerAuth: [jobs:read]
+      responses:
+        '200':
+          description: Job status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Job'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/jobs/{jobId}/logs:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    get:
+      tags: [Jobs]
+      summary: Get job logs
+      description: |
+        Returns job logs. Supports two modes:
+        - **Polling:** `Accept: application/json` — returns paginated log
+          entries with a cursor.
+        - **Streaming:** `Accept: text/event-stream` — streams log
+          entries in real-time via Server-Sent Events.
+      operationId: getJobLogs
+      security:
+        - bearerAuth: [jobs:read]
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
+          description: Pagination cursor for log entries (polling mode).
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+            maximum: 1000
+          description: Maximum number of log entries to return (polling mode).
+        - name: follow
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: If true, keep the connection open for new log entries (polling mode).
+      responses:
+        '200':
+          description: Job logs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      logs:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/LogEntry'
+                      has_more:
+                        type: boolean
+                      next_cursor:
+                        type: string
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE stream of log entries.
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/jobs/{jobId}/outputs:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    get:
+      tags: [Jobs]
+      summary: Get job outputs
+      description: |
+        Returns the outputs/artifacts produced by a completed job
+        (e.g., SSH connection string, Ansible logs, kubeconfig).
+      operationId: getJobOutputs
+      security:
+        - bearerAuth: [jobs:read]
+      responses:
+        '200':
+          description: Job outputs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      outputs:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/JobOutput'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/jobs/{jobId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    post:
+      tags: [Jobs]
+      summary: Cancel a running job
+      description: |
+        Sends a cancellation signal to the job worker. If the job is
+        pending, it is removed from the queue. If running, the worker
+        attempts graceful cleanup.
+      operationId: cancelJob
+      security:
+        - bearerAuth: [jobs:cancel]
+      responses:
+        '200':
+          description: Job cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Job'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Job is already in a terminal state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+
+# ════════════════════════════════════════════════════════════
+# Components
+# ════════════════════════════════════════════════════════════
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        OAuth 2.0 Bearer token (JWT from Keycloak) or opaque API token
+        (`ewc_...`). Include scopes in the token; the backend enforces
+        per-endpoint scope requirements.
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      schema:
+        type: string
+        format: uuid
+      description: |
+        Unique key for idempotent requests. Submitting the same key
+        within 24 hours returns the original response.
+    DryRun:
+      name: dry_run
+      in: query
+      schema:
+        type: boolean
+        default: false
+      description: If true, return the planned action without executing.
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        default: 50
+        minimum: 1
+        maximum: 200
+      description: Maximum number of items to return.
+    Cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+      description: Pagination cursor from a previous response.
+    ProfileId:
+      name: profileId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Profile name or ID.
+    ServerName:
+      name: serverName
+      in: path
+      required: true
+      schema:
+        type: string
+      description: OpenStack server name.
+    HubItemName:
+      name: itemName
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Hub item name (from `GET /v1/hub/items`).
+    KeypairName:
+      name: keypairName
+      in: path
+      required: true
+      schema:
+        type: string
+      description: OpenStack keypair name.
+    DnsRecordName:
+      name: recordName
+      in: path
+      required: true
+      schema:
+        type: string
+      description: DNS record name.
+    BucketName:
+      name: bucketName
+      in: path
+      required: true
+      schema:
+        type: string
+      description: S3 bucket name.
+    JobId:
+      name: jobId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Job identifier.
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    Unauthorized:
+      description: Authentication required or token expired
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+
+  schemas:
+    # ── Common ──
+    ProblemDetail:
+      type: object
+      description: RFC 9457 problem detail with EWC-specific extensions.
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        code:
+          type: string
+          description: Machine-readable error code (e.g., CREDENTIAL_EXPIRED).
+        retryable:
+          type: boolean
+          description: Whether the client should retry the request.
+        required_scopes:
+          type: array
+          items:
+            type: string
+          description: Required OAuth2 scopes (for 403 errors).
+
+    PaginationMeta:
+      type: object
+      properties:
+        request_id:
+          type: string
+        pagination:
+          type: object
+          properties:
+            limit:
+              type: integer
+            next_cursor:
+              type: string
+              nullable: true
+
+    # ── Auth ──
+    LoginInitResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            authorization_url:
+              type: string
+              format: uri
+            state:
+              type: string
+            profile:
+              type: string
+
+    TokenRequest:
+      type: object
+      properties:
+        grant_type:
+          type: string
+          enum: [authorization_code, refresh_token, client_credentials]
+        code:
+          type: string
+          description: Authorization code (for authorization_code grant).
+        refresh_token:
+          type: string
+          description: Refresh token (for refresh_token grant).
+        client_id:
+          type: string
+        client_secret:
+          type: string
+        redirect_uri:
+          type: string
+          format: uri
+
+    TokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+          example: 900
+        scope:
+          type: string
+          example: servers:read servers:write hub:read hub:deploy
+
+    # ── Profiles ──
+    Profile:
+      type: object
+      properties:
+        profile_id:
+          type: string
+        federee:
+          type: string
+          enum: [ECMWF, EUMETSAT]
+        region:
+          type: string
+          enum: [CC1, CC2, WAW3-1, ECIS-R1, ECIS-R2]
+        tenant_name:
+          type: string
+        ssh_public_key_path:
+          type: string
+        ssh_private_key_path:
+          type: string
+        kubeconfig_path:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ProfileCreate:
+      type: object
+      required: [federee, region, tenant_name]
+      properties:
+        federee:
+          type: string
+          enum: [ECMWF, EUMETSAT]
+        region:
+          type: string
+          enum: [CC1, CC2, WAW3-1, ECIS-R1, ECIS-R2]
+        tenant_name:
+          type: string
+        ssh_public_key_path:
+          type: string
+        ssh_private_key_path:
+          type: string
+
+    ProfileUpdate:
+      type: object
+      properties:
+        ssh_public_key_path:
+          type: string
+        ssh_private_key_path:
+          type: string
+        refresh_credentials:
+          type: boolean
+          default: false
+          description: Force re-retrieval of OpenStack credentials from OpenBao.
+
+    # ── Servers ──
+    ServerSummary:
+      type: object
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          example: ACTIVE
+        networks:
+          type: string
+          description: Comma-separated network names with IPs.
+        flavor:
+          type: string
+        id:
+          type: string
+          format: uuid
+
+    ServerDetail:
+      type: object
+      properties:
+        name:
+          type: string
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        flavor:
+          type: string
+        image:
+          type: string
+        networks:
+          type: array
+          items:
+            type: object
+            properties:
+              network:
+                type: string
+              addresses:
+                type: array
+                items:
+                  type: string
+        security_groups:
+          type: array
+          items:
+            type: string
+        keypair:
+          type: string
+        internal_ip:
+          type: string
+          nullable: true
+        external_ip:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    ServerCreate:
+      type: object
+      required: [server_name]
+      properties:
+        server_name:
+          type: string
+          maxLength: 63
+        image_name:
+          type: string
+          description: Short image name (e.g., Rocky-9) or full name.
+          default: Rocky-9
+        flavour_name:
+          type: string
+          description: OpenStack flavor name. Defaults to per-federee/region CPU flavor.
+        networks:
+          type: array
+          items:
+            type: string
+          description: Network names. Defaults to 'private'.
+        security_groups:
+          type: array
+          items:
+            type: string
+          description: Security group names. Defaults to 'ssh'.
+        keypair_name:
+          type: string
+          description: OpenStack keypair name. Auto-generated if omitted.
+        external_ip:
+          type: boolean
+          default: false
+          description: Assign a floating IP to the server.
+        force:
+          type: boolean
+          default: false
+          description: Force recreation if server exists with different config.
+        ssh_public_key_path:
+          type: string
+          description: Path to SSH public key (on backend filesystem).
+        ssh_private_key_path:
+          type: string
+          description: Path to SSH private key (on backend filesystem).
+
+    ServerConflict:
+      type: object
+      properties:
+        code:
+          type: string
+          example: SERVER_CONFIG_CONFLICT
+        server_name:
+          type: string
+        diffs:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              current:
+                type: string
+              requested:
+                type: string
+        message:
+          type: string
+          description: Use force=true to reconfigure.
+
+    # ── Hub ──
+    HubItemSummary:
+      type: object
+      properties:
+        name:
+          type: string
+        title:
+          type: string
+        version:
+          type: string
+        summary:
+          type: string
+        annotations:
+          type: object
+          properties:
+            technology:
+              type: array
+              items:
+                type: string
+              example: [Ansible Playbook]
+            category:
+              type: array
+              items:
+                type: string
+              example: [GPU-accelerated]
+            other:
+              type: array
+              items:
+                type: string
+              example: [EWCCLI-compatible]
+
+    HubItemDetail:
+      type: object
+      properties:
+        name:
+          type: string
+        title:
+          type: string
+        version:
+          type: string
+        summary:
+          type: string
+        description:
+          type: string
+        sources:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+                enum: [git, path]
+              url:
+                type: string
+              ref:
+                type: string
+        ewccli:
+          type: object
+          properties:
+            inputs:
+              type: array
+              items:
+                $ref: '#/components/schemas/HubItemInput'
+            default_image_name:
+              type: string
+            default_security_groups:
+              type: array
+              items:
+                type: string
+            path_to_main_file:
+              type: string
+            path_to_requirements_file:
+              type: string
+            external_ip:
+              type: boolean
+            check_dns:
+              type: boolean
+        deploy_command:
+          type: string
+          description: Example deploy command.
+
+    HubItemInput:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        required:
+          type: boolean
+        default:
+          description: Default value if the input is not provided.
+
+    HubDeployRequest:
+      type: object
+      required: [item]
+      properties:
+        item:
+          type: string
+          description: Hub item name.
+        server_name:
+          type: string
+          description: Server name to deploy on. Auto-generated if omitted.
+        item_inputs:
+          type: array
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+              value:
+                type: string
+          description: Key-value pairs for item-specific inputs.
+        image_name:
+          type: string
+        flavour_name:
+          type: string
+        networks:
+          type: array
+          items:
+            type: string
+        security_groups:
+          type: array
+          items:
+            type: string
+        keypair_name:
+          type: string
+        external_ip:
+          type: boolean
+          default: false
+        force:
+          type: boolean
+          default: false
+        ssh_public_key_path:
+          type: string
+        ssh_private_key_path:
+          type: string
+
+    # ── Keypairs ──
+    Keypair:
+      type: object
+      properties:
+        name:
+          type: string
+        fingerprint:
+          type: string
+        public_key:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    KeypairCreate:
+      type: object
+      required: [keypair_name]
+      properties:
+        keypair_name:
+          type: string
+        public_key:
+          type: string
+          description: SSH public key content (not path, since backend holds it).
+        force:
+          type: boolean
+          default: false
+          description: Delete existing keypair and recreate if names conflict.
+
+    # ── DNS ──
+    DnsRecord:
+      type: object
+      properties:
+        name:
+          type: string
+        namespace:
+          type: string
+        domain_name:
+          type: string
+        record_name:
+          type: string
+        records:
+          type: array
+          items:
+            type: string
+        ttl:
+          type: integer
+          example: 300
+        record_type:
+          type: string
+          enum: [A, AAAA, CNAME, TXT]
+        geo_enabled:
+          type: boolean
+        health_endpoint:
+          type: string
+        geo_ssl:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        status:
+          type: object
+          description: Kubernetes CRD status conditions.
+
+    DnsRecordCreate:
+      type: object
+      required: [domain_name, record_name, records]
+      properties:
+        domain_name:
+          type: string
+        record_name:
+          type: string
+        records:
+          type: array
+          items:
+            type: string
+        ttl:
+          type: integer
+          default: 300
+        record_type:
+          type: string
+          enum: [A, AAAA, CNAME, TXT]
+          default: A
+        geo_enabled:
+          type: boolean
+          default: false
+        health_endpoint:
+          type: string
+          default: /
+        geo_ssl:
+          type: boolean
+          default: false
+
+    # ── S3 ──
+    S3Bucket:
+      type: object
+      properties:
+        name:
+          type: string
+        namespace:
+          type: string
+        owner:
+          type: string
+        write_access_ids:
+          type: array
+          items:
+            type: string
+        read_access_ids:
+          type: array
+          items:
+            type: string
+        geo_enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        status:
+          type: object
+
+    S3BucketCreate:
+      type: object
+      required: [bucket_name, access_id]
+      properties:
+        bucket_name:
+          type: string
+        access_id:
+          type: string
+          description: Owner access ID.
+        write_access_ids:
+          type: array
+          items:
+            type: string
+        write_access_refs_ids:
+          type: array
+          items:
+            type: string
+        read_access_ids:
+          type: array
+          items:
+            type: string
+        read_access_refs_ids:
+          type: array
+          items:
+            type: string
+        geo_enabled:
+          type: boolean
+          default: false
+
+    # ── Jobs ──
+    JobRef:
+      type: object
+      properties:
+        job_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        resource_type:
+          type: string
+          enum: [server, hub, keypair, dns, s3]
+        resource_name:
+          type: string
+        operation:
+          type: string
+          enum: [create, delete, deploy, reconfigure, dns_check]
+        created_at:
+          type: string
+          format: date-time
+        estimated_duration_seconds:
+          type: integer
+
+    JobStatus:
+      type: string
+      enum: [pending, running, completed, failed, cancelled, timeout]
+
+    Job:
+      type: object
+      properties:
+        job_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        resource_type:
+          type: string
+          enum: [server, hub, keypair, dns, s3]
+        resource_name:
+          type: string
+        operation:
+          type: string
+          enum: [create, delete, deploy, reconfigure, dns_check]
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        progress_message:
+          type: string
+        estimated_remaining_seconds:
+          type: integer
+          nullable: true
+        timeout_at:
+          type: string
+          format: date-time
+          nullable: true
+        result:
+          description: Job result (present when status is completed).
+        error:
+          $ref: '#/components/schemas/JobError'
+        idempotency_key:
+          type: string
+          nullable: true
+
+    JobError:
+      type: object
+      properties:
+        code:
+          type: string
+          example: SERVER_CREATE_FAILED
+        message:
+          type: string
+        retryable:
+          type: boolean
+        details:
+          type: object
+          additionalProperties: true
+
+    LogEntry:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        level:
+          type: string
+          enum: [debug, info, warning, error]
+        message:
+          type: string
+        source:
+          type: string
+          description: Component that produced the log (e.g., openstack, ansible, dns).
+
+    JobOutput:
+      type: object
+      properties:
+        name:
+          type: string
+          example: ssh_command
+        type:
+          type: string
+          enum: [text, log, json, file]
+        value:
+          type: string
+
+    # ── Capabilities ──
+    CapabilitiesResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            version:
+              type: string
+            operations:
+              type: array
+              items:
+                type: object
+                properties:
+                  method:
+                    type: string
+                    enum: [GET, POST, PUT, DELETE]
+                  path:
+                    type: string
+                  summary:
+                    type: string
+                  async:
+                    type: boolean
+                  required_scopes:
+                    type: array
+                    items:
+                      type: string
+                  estimated_duration_seconds:
+                    type: integer
+                    nullable: true
+                  supports_dry_run:
+                    type: boolean
