@@ -5,7 +5,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.deps import dry_run_param, get_server_service, idempotency_key, pagination
-from app.jobs.engine import JobEngine, get_job_service
+from app.api.deps import get_job_service
+from app.jobs.engine import JobEngine
 from app.models.common import DataEnvelope, ListEnvelope, PaginationMeta, JobRefEnvelope
 from app.models.server import ServerCreate, ServerConflict, ServerDetail, ServerSummary
 from app.models.job import JobRef
