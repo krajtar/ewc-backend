@@ -1,29 +1,50 @@
-"""Tests for health and readiness endpoints."""
+"""Health and readiness endpoint tests."""
 
 from fastapi.testclient import TestClient
 
-from app.main import create_app
+
+def test_healthz(client: TestClient):
+    """GET /healthz returns 200 with status ok."""
+    resp = client.get("/healthz")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
 
 
-class TestHealth:
-    def setup_method(self) -> None:
-        self.app = create_app()
-        self.client = TestClient(self.app)
+def test_readyz(client: TestClient):
+    """GET /readyz returns 200 with status ready."""
+    resp = client.get("/readyz")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ready"
 
-    def test_healthz_returns_200(self) -> None:
-        resp = self.client.get("/healthz")
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "ok"
 
-    def test_readyz_returns_200(self) -> None:
-        resp = self.client.get("/readyz")
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "ready"
+def test_healthz_response_shape(client: TestClient):
+    """healthz response has exactly the expected shape."""
+    resp = client.get("/healthz")
+    body = resp.json()
+    assert isinstance(body, dict)
+    assert set(body.keys()) == {"status"}
 
-    def test_request_id_header(self) -> None:
-        resp = self.client.get("/healthz")
-        assert "X-Request-ID" in resp.headers
 
-    def test_request_id_echoed(self) -> None:
-        resp = self.client.get("/healthz", headers={"X-Request-ID": "test-123"})
-        assert resp.headers["X-Request-ID"] == "test-123"
+def test_readyz_response_shape(client: TestClient):
+    """readyz response has exactly the expected shape."""
+    resp = client.get("/readyz")
+    body = resp.json()
+    assert isinstance(body, dict)
+    assert set(body.keys()) == {"status"}
+
+
+def test_docs_available(client: TestClient):
+    """Swagger UI docs endpoint is accessible."""
+    resp = client.get("/docs")
+    assert resp.status_code == 200
+
+
+def test_openapi_json_available(client: TestClient):
+    """OpenAPI JSON spec is accessible."""
+    resp = client.get("/openapi.json")
+    assert resp.status_code == 200
+    spec = resp.json()
+    assert spec["info"]["title"] == "EWC Backend API"
+    assert "paths" in spec

@@ -5,7 +5,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import dry_run_param, get_keypair_service, idempotency_key
-from app.jobs.engine import JobEngine, get_job_service
+from app.api.deps import get_job_service
+from app.jobs.engine import JobEngine
 from app.models.common import DataEnvelope, ListEnvelope, JobRefEnvelope
 from app.models.keypair import Keypair, KeypairCreate
 from app.services.keypair_service import KeypairService
